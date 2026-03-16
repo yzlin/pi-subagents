@@ -73,6 +73,8 @@ export interface AgentRecord {
   joinMode?: JoinMode;
   /** Set when result was already consumed via get_subagent_result — suppresses completion notification. */
   resultConsumed?: boolean;
+  /** Steering messages queued before the session was ready. */
+  pendingSteers?: string[];
   /** Worktree info if the agent is running in an isolated worktree. */
   worktree?: { path: string; branch: string };
   /** Worktree cleanup result after agent completion. */

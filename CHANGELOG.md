@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] - 2026-03-16
+
+### Fixed
+- **Race condition in `get_subagent_result` with `wait: true`** — `resultConsumed` is now set before `await record.promise`, preventing a redundant follow-up notification. Previously the `onComplete` callback (attached at spawn time via `.then()`) always fired before the await resumed, seeing `resultConsumed` as false.
+- **Stale agent records across sessions** — new `clearCompleted()` method removes all completed/stopped/errored agent records on `session_start` and `session_switch` events, so tasks from a prior session don't persist into a new one.
+- **`steer_subagent` race on freshly launched agents** — steering an agent before its session initialized silently dropped the message. Now steers are queued on the record and flushed once `onSessionCreated` fires.
+
+### Changed
+- Extracted `removeRecord()` private helper in `AgentManager` — deduplicates dispose+delete logic between `cleanup()` and `clearCompleted()`.
+
+### Added
+- 8 new tests covering `resultConsumed` race condition and `clearCompleted` behavior (185 total).
+
 ## [0.4.3] - 2026-03-13
 
 ### Added
@@ -242,6 +255,7 @@ Initial release.
 - **Thinking level** — per-agent extended thinking control
 - **`/agent` and `/agents` commands**
 
+[0.4.4]: https://github.com/tintinweb/pi-subagents/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/tintinweb/pi-subagents/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/tintinweb/pi-subagents/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/tintinweb/pi-subagents/compare/v0.4.0...v0.4.1

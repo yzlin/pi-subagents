@@ -152,6 +152,13 @@ export class AgentManager {
       onTextDelta: options.onTextDelta,
       onSessionCreated: (session) => {
         record.session = session;
+        // Flush any steers that arrived before the session was ready
+        if (record.pendingSteers?.length) {
+          for (const msg of record.pendingSteers) {
+            session.steer(msg).catch(() => {});
+          }
+          record.pendingSteers = undefined;
+        }
         options.onSessionCreated?.(session);
       },
     })
@@ -300,18 +307,30 @@ export class AgentManager {
     return true;
   }
 
+  /** Dispose a record's session and remove it from the map. */
+  private removeRecord(id: string, record: AgentRecord): void {
+    record.session?.dispose?.();
+    record.session = undefined;
+    this.agents.delete(id);
+  }
+
   private cleanup() {
     const cutoff = Date.now() - 10 * 60_000;
     for (const [id, record] of this.agents) {
       if (record.status === "running" || record.status === "queued") continue;
       if ((record.completedAt ?? 0) >= cutoff) continue;
+      this.removeRecord(id, record);
+    }
+  }
 
-      // Dispose and clear session so memory can be reclaimed
-      if (record.session) {
-        record.session.dispose();
-        record.session = undefined;
-      }
-      this.agents.delete(id);
+  /**
+   * Remove all completed/stopped/errored records immediately.
+   * Called on session start/switch so tasks from a prior session don't persist.
+   */
+  clearCompleted(): void {
+    for (const [id, record] of this.agents) {
+      if (record.status === "running" || record.status === "queued") continue;
+      this.removeRecord(id, record);
     }
   }
 

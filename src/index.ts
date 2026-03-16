@@ -284,6 +284,10 @@ export default function (pi: ExtensionAPI) {
     getRecord: (id: string) => manager.getRecord(id),
   };
 
+  // Clear completed tasks when a new session starts (e.g. /new) so stale records don't persist
+  pi.on("session_start", () => { manager.clearCompleted(); });
+  pi.on("session_switch", () => { manager.clearCompleted(); });
+
   // Wait for all subagents on shutdown, then dispose the manager
   pi.on("session_shutdown", async () => {
     delete (globalThis as any)[MANAGER_KEY];
@@ -812,8 +816,12 @@ Guidelines:
         return textResult(`Agent not found: "${params.agent_id}". It may have been cleaned up.`);
       }
 
-      // Wait for completion if requested
+      // Wait for completion if requested.
+      // Pre-mark resultConsumed BEFORE awaiting: onComplete fires inside .then()
+      // (attached earlier at spawn time) and always runs before this await resumes.
+      // Setting the flag here prevents a redundant follow-up notification.
       if (params.wait && record.status === "running" && record.promise) {
+        record.resultConsumed = true;
         await record.promise;
       }
 
@@ -877,7 +885,10 @@ Guidelines:
         return textResult(`Agent "${params.agent_id}" is not running (status: ${record.status}). Cannot steer a non-running agent.`);
       }
       if (!record.session) {
-        return textResult(`Agent "${params.agent_id}" has no active session yet. It may still be initializing.`);
+        // Session not ready yet — queue the steer for delivery once initialized
+        (record.pendingSteers ??= []).push(params.message);
+        pi.events.emit("subagents:steered", { id: record.id, message: params.message });
+        return textResult(`Steering message queued for agent ${record.id}. It will be delivered once the session initializes.`);
       }
 
       try {
