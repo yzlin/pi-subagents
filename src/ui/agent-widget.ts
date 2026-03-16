@@ -155,6 +155,13 @@ export class AgentWidget {
   /** How many extra turns errors/aborted agents linger (completed agents clear after 1 turn). */
   private static readonly ERROR_LINGER_TURNS = 2;
 
+  /** Whether the widget callback is currently registered with the TUI. */
+  private widgetRegistered = false;
+  /** Cached TUI reference from widget factory callback, used for requestRender(). */
+  private tui: any | undefined;
+  /** Last status bar text, used to avoid redundant setStatus calls. */
+  private lastStatusText: string | undefined;
+
   constructor(
     private manager: AgentManager,
     private agentActivity: Map<string, AgentActivity>,
@@ -162,7 +169,14 @@ export class AgentWidget {
 
   /** Set the UI context (grabbed from first tool execution). */
   setUICtx(ctx: UICtx) {
-    this.uiCtx = ctx;
+    if (ctx !== this.uiCtx) {
+      // UICtx changed — the widget registered on the old context is gone.
+      // Force re-registration on next update().
+      this.uiCtx = ctx;
+      this.widgetRegistered = false;
+      this.tui = undefined;
+      this.lastStatusText = undefined;
+    }
   }
 
   /**
@@ -234,9 +248,11 @@ export class AgentWidget {
     return `${icon} ${theme.fg("dim", name)}${modeTag}  ${theme.fg("dim", a.description)} ${theme.fg("dim", "·")} ${theme.fg("dim", parts.join(" · "))}${statusText}`;
   }
 
-  /** Force an immediate widget update. */
-  update() {
-    if (!this.uiCtx) return;
+  /**
+   * Render the widget content. Called from the registered widget's render() callback,
+   * reading live state each time instead of capturing it in a closure.
+   */
+  private renderWidget(tui: any, theme: Theme): string[] {
     const allAgents = this.manager.listAgents();
     const running = allAgents.filter(a => a.status === "running");
     const queued = allAgents.filter(a => a.status === "queued");
@@ -248,10 +264,153 @@ export class AgentWidget {
     const hasActive = running.length > 0 || queued.length > 0;
     const hasFinished = finished.length > 0;
 
+    // Nothing to show — return empty (widget will be unregistered by update())
+    if (!hasActive && !hasFinished) return [];
+
+    const w = tui.terminal.columns;
+    const truncate = (line: string) => truncateToWidth(line, w);
+    const headingColor = hasActive ? "accent" : "dim";
+    const headingIcon = hasActive ? "●" : "○";
+    const frame = SPINNER[this.widgetFrame % SPINNER.length];
+
+    // Build sections separately for overflow-aware assembly.
+    // Each running agent = 2 lines (header + activity), finished = 1 line, queued = 1 line.
+
+    const finishedLines: string[] = [];
+    for (const a of finished) {
+      finishedLines.push(truncate(theme.fg("dim", "├─") + " " + this.renderFinishedLine(a, theme)));
+    }
+
+    const runningLines: string[][] = []; // each entry is [header, activity]
+    for (const a of running) {
+      const name = getDisplayName(a.type);
+      const modeLabel = getPromptModeLabel(a.type);
+      const modeTag = modeLabel ? ` ${theme.fg("dim", `(${modeLabel})`)}` : "";
+      const elapsed = formatMs(Date.now() - a.startedAt);
+
+      const bg = this.agentActivity.get(a.id);
+      const toolUses = bg?.toolUses ?? a.toolUses;
+      let tokenText = "";
+      if (bg?.session) {
+        try { tokenText = formatTokens(bg.session.getSessionStats().tokens.total); } catch { /* */ }
+      }
+
+      const parts: string[] = [];
+      if (toolUses > 0) parts.push(`${toolUses} tool use${toolUses === 1 ? "" : "s"}`);
+      if (tokenText) parts.push(tokenText);
+      parts.push(elapsed);
+      const statsText = parts.join(" · ");
+
+      const activity = bg ? describeActivity(bg.activeTools, bg.responseText) : "thinking…";
+
+      runningLines.push([
+        truncate(theme.fg("dim", "├─") + ` ${theme.fg("accent", frame)} ${theme.bold(name)}${modeTag}  ${theme.fg("muted", a.description)} ${theme.fg("dim", "·")} ${theme.fg("dim", statsText)}`),
+        truncate(theme.fg("dim", "│  ") + theme.fg("dim", `  ⎿  ${activity}`)),
+      ]);
+    }
+
+    const queuedLine = queued.length > 0
+      ? truncate(theme.fg("dim", "├─") + ` ${theme.fg("muted", "◦")} ${theme.fg("dim", `${queued.length} queued`)}`)
+      : undefined;
+
+    // Assemble with overflow cap (heading + overflow indicator = 2 reserved lines).
+    const maxBody = MAX_WIDGET_LINES - 1; // heading takes 1 line
+    const totalBody = finishedLines.length + runningLines.length * 2 + (queuedLine ? 1 : 0);
+
+    const lines: string[] = [truncate(theme.fg(headingColor, headingIcon) + " " + theme.fg(headingColor, "Agents"))];
+
+    if (totalBody <= maxBody) {
+      // Everything fits — add all lines and fix up connectors for the last item.
+      lines.push(...finishedLines);
+      for (const pair of runningLines) lines.push(...pair);
+      if (queuedLine) lines.push(queuedLine);
+
+      // Fix last connector: swap ├─ → └─ and │ → space for activity lines.
+      if (lines.length > 1) {
+        const last = lines.length - 1;
+        lines[last] = lines[last].replace("├─", "└─");
+        // If last item is a running agent activity line, fix indent of that line
+        // and fix the header line above it.
+        if (runningLines.length > 0 && !queuedLine) {
+          // The last two lines are the last running agent's header + activity.
+          if (last >= 2) {
+            lines[last - 1] = lines[last - 1].replace("├─", "└─");
+            lines[last] = lines[last].replace("│  ", "   ");
+          }
+        }
+      }
+    } else {
+      // Overflow — prioritize: running > queued > finished.
+      // Reserve 1 line for overflow indicator.
+      let budget = maxBody - 1;
+      let hiddenRunning = 0;
+      let hiddenFinished = 0;
+
+      // 1. Running agents (2 lines each)
+      for (const pair of runningLines) {
+        if (budget >= 2) {
+          lines.push(...pair);
+          budget -= 2;
+        } else {
+          hiddenRunning++;
+        }
+      }
+
+      // 2. Queued line
+      if (queuedLine && budget >= 1) {
+        lines.push(queuedLine);
+        budget--;
+      }
+
+      // 3. Finished agents
+      for (const fl of finishedLines) {
+        if (budget >= 1) {
+          lines.push(fl);
+          budget--;
+        } else {
+          hiddenFinished++;
+        }
+      }
+
+      // Overflow summary
+      const overflowParts: string[] = [];
+      if (hiddenRunning > 0) overflowParts.push(`${hiddenRunning} running`);
+      if (hiddenFinished > 0) overflowParts.push(`${hiddenFinished} finished`);
+      const overflowText = overflowParts.join(", ");
+      lines.push(truncate(theme.fg("dim", "└─") + ` ${theme.fg("dim", `+${hiddenRunning + hiddenFinished} more (${overflowText})`)}`)
+      );
+    }
+
+    return lines;
+  }
+
+  /** Force an immediate widget update. */
+  update() {
+    if (!this.uiCtx) return;
+    const allAgents = this.manager.listAgents();
+
+    // Lightweight existence checks — full categorization happens in renderWidget()
+    let runningCount = 0;
+    let queuedCount = 0;
+    let hasFinished = false;
+    for (const a of allAgents) {
+      if (a.status === "running") { runningCount++; }
+      else if (a.status === "queued") { queuedCount++; }
+      else if (a.completedAt && this.shouldShowFinished(a.id, a.status)) { hasFinished = true; }
+    }
+    const hasActive = runningCount > 0 || queuedCount > 0;
+
     // Nothing to show — clear widget
     if (!hasActive && !hasFinished) {
-      this.uiCtx.setWidget("agents", undefined);
-      this.uiCtx.setStatus("subagents", undefined);
+      if (this.widgetRegistered) {
+        this.uiCtx.setWidget("agents", undefined);
+        this.widgetRegistered = false;
+        this.tui = undefined;
+      }
+      if (this.lastStatusText !== undefined) {
+        this.uiCtx.setStatus("subagents", undefined);
+        this.lastStatusText = undefined;
+      }
       if (this.widgetInterval) { clearInterval(this.widgetInterval); this.widgetInterval = undefined; }
       // Clean up stale entries
       for (const [id] of this.finishedTurnAge) {
@@ -260,136 +419,41 @@ export class AgentWidget {
       return;
     }
 
-    // Status bar
+    // Status bar — only call setStatus when the text actually changes
+    let newStatusText: string | undefined;
     if (hasActive) {
       const statusParts: string[] = [];
-      if (running.length > 0) statusParts.push(`${running.length} running`);
-      if (queued.length > 0) statusParts.push(`${queued.length} queued`);
-      const total = running.length + queued.length;
-      this.uiCtx.setStatus("subagents", `${statusParts.join(", ")} agent${total === 1 ? "" : "s"}`);
-    } else {
-      this.uiCtx.setStatus("subagents", undefined);
+      if (runningCount > 0) statusParts.push(`${runningCount} running`);
+      if (queuedCount > 0) statusParts.push(`${queuedCount} queued`);
+      const total = runningCount + queuedCount;
+      newStatusText = `${statusParts.join(", ")} agent${total === 1 ? "" : "s"}`;
+    }
+    if (newStatusText !== this.lastStatusText) {
+      this.uiCtx.setStatus("subagents", newStatusText);
+      this.lastStatusText = newStatusText;
     }
 
     this.widgetFrame++;
-    const frame = SPINNER[this.widgetFrame % SPINNER.length];
 
-    this.uiCtx.setWidget("agents", (tui, theme) => {
-      const w = tui.terminal.columns;
-      const truncate = (line: string) => truncateToWidth(line, w);
-      const headingColor = hasActive ? "accent" : "dim";
-      const headingIcon = hasActive ? "●" : "○";
-
-      // Build sections separately for overflow-aware assembly.
-      // Each running agent = 2 lines (header + activity), finished = 1 line, queued = 1 line.
-
-      const finishedLines: string[] = [];
-      for (const a of finished) {
-        finishedLines.push(truncate(theme.fg("dim", "├─") + " " + this.renderFinishedLine(a, theme)));
-      }
-
-      const runningLines: string[][] = []; // each entry is [header, activity]
-      for (const a of running) {
-        const name = getDisplayName(a.type);
-        const modeLabel = getPromptModeLabel(a.type);
-        const modeTag = modeLabel ? ` ${theme.fg("dim", `(${modeLabel})`)}` : "";
-        const elapsed = formatMs(Date.now() - a.startedAt);
-
-        const bg = this.agentActivity.get(a.id);
-        const toolUses = bg?.toolUses ?? a.toolUses;
-        let tokenText = "";
-        if (bg?.session) {
-          try { tokenText = formatTokens(bg.session.getSessionStats().tokens.total); } catch { /* */ }
-        }
-
-        const parts: string[] = [];
-        if (toolUses > 0) parts.push(`${toolUses} tool use${toolUses === 1 ? "" : "s"}`);
-        if (tokenText) parts.push(tokenText);
-        parts.push(elapsed);
-        const statsText = parts.join(" · ");
-
-        const activity = bg ? describeActivity(bg.activeTools, bg.responseText) : "thinking…";
-
-        runningLines.push([
-          truncate(theme.fg("dim", "├─") + ` ${theme.fg("accent", frame)} ${theme.bold(name)}${modeTag}  ${theme.fg("muted", a.description)} ${theme.fg("dim", "·")} ${theme.fg("dim", statsText)}`),
-          truncate(theme.fg("dim", "│  ") + theme.fg("dim", `  ⎿  ${activity}`)),
-        ]);
-      }
-
-      const queuedLine = queued.length > 0
-        ? truncate(theme.fg("dim", "├─") + ` ${theme.fg("muted", "◦")} ${theme.fg("dim", `${queued.length} queued`)}`)
-        : undefined;
-
-      // Assemble with overflow cap (heading + overflow indicator = 2 reserved lines).
-      const maxBody = MAX_WIDGET_LINES - 1; // heading takes 1 line
-      const totalBody = finishedLines.length + runningLines.length * 2 + (queuedLine ? 1 : 0);
-
-      const lines: string[] = [truncate(theme.fg(headingColor, headingIcon) + " " + theme.fg(headingColor, "Agents"))];
-
-      if (totalBody <= maxBody) {
-        // Everything fits — add all lines and fix up connectors for the last item.
-        lines.push(...finishedLines);
-        for (const pair of runningLines) lines.push(...pair);
-        if (queuedLine) lines.push(queuedLine);
-
-        // Fix last connector: swap ├─ → └─ and │ → space for activity lines.
-        if (lines.length > 1) {
-          const last = lines.length - 1;
-          lines[last] = lines[last].replace("├─", "└─");
-          // If last item is a running agent activity line, fix indent of that line
-          // and fix the header line above it.
-          if (runningLines.length > 0 && !queuedLine) {
-            // The last two lines are the last running agent's header + activity.
-            if (last >= 2) {
-              lines[last - 1] = lines[last - 1].replace("├─", "└─");
-              lines[last] = lines[last].replace("│  ", "   ");
-            }
-          }
-        }
-      } else {
-        // Overflow — prioritize: running > queued > finished.
-        // Reserve 1 line for overflow indicator.
-        let budget = maxBody - 1;
-        let hiddenRunning = 0;
-        let hiddenFinished = 0;
-
-        // 1. Running agents (2 lines each)
-        for (const pair of runningLines) {
-          if (budget >= 2) {
-            lines.push(...pair);
-            budget -= 2;
-          } else {
-            hiddenRunning++;
-          }
-        }
-
-        // 2. Queued line
-        if (queuedLine && budget >= 1) {
-          lines.push(queuedLine);
-          budget--;
-        }
-
-        // 3. Finished agents
-        for (const fl of finishedLines) {
-          if (budget >= 1) {
-            lines.push(fl);
-            budget--;
-          } else {
-            hiddenFinished++;
-          }
-        }
-
-        // Overflow summary
-        const overflowParts: string[] = [];
-        if (hiddenRunning > 0) overflowParts.push(`${hiddenRunning} running`);
-        if (hiddenFinished > 0) overflowParts.push(`${hiddenFinished} finished`);
-        const overflowText = overflowParts.join(", ");
-        lines.push(truncate(theme.fg("dim", "└─") + ` ${theme.fg("dim", `+${hiddenRunning + hiddenFinished} more (${overflowText})`)}`)
-        );
-      }
-
-      return { render: () => lines, invalidate: () => {} };
-    }, { placement: "aboveEditor" });
+    // Register widget callback once; subsequent updates use requestRender()
+    // which re-invokes render() without replacing the component (avoids layout thrashing).
+    if (!this.widgetRegistered) {
+      this.uiCtx.setWidget("agents", (tui, theme) => {
+        this.tui = tui;
+        return {
+          render: () => this.renderWidget(tui, theme),
+          invalidate: () => {
+            // Theme changed — force re-registration so factory captures fresh theme.
+            this.widgetRegistered = false;
+            this.tui = undefined;
+          },
+        };
+      }, { placement: "aboveEditor" });
+      this.widgetRegistered = true;
+    } else {
+      // Widget already registered — just request a re-render of existing components.
+      this.tui?.requestRender();
+    }
   }
 
   dispose() {
@@ -401,5 +465,8 @@ export class AgentWidget {
       this.uiCtx.setWidget("agents", undefined);
       this.uiCtx.setStatus("subagents", undefined);
     }
+    this.widgetRegistered = false;
+    this.tui = undefined;
+    this.lastStatusText = undefined;
   }
 }

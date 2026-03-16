@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.5] - 2026-03-16
+
+### Changed
+- **Widget render-once pattern** — the widget callback is now registered once via `setWidget()` and subsequent updates use `requestRender()` instead of re-registering the entire widget on every `update()` call. Eliminates layout thrashing from repeated widget teardown/setup cycles.
+- **Status bar dedup** — `setStatus()` is now only called when the status text actually changes, avoiding redundant TUI updates.
+- **UICtx change detection** — `setUICtx()` detects context changes and forces widget re-registration, correctly handling session switches.
+
+### Refactored
+- Extracted `renderWidget()` private method — moves all widget content rendering out of the `update()` closure into a standalone method that reads live state on each call.
+- `update()` is now a lightweight coordinator: counts agents, manages registration lifecycle, and triggers re-renders.
+
 ## [0.4.4] - 2026-03-16
 
 ### Fixed
@@ -255,6 +266,7 @@ Initial release.
 - **Thinking level** — per-agent extended thinking control
 - **`/agent` and `/agents` commands**
 
+[0.4.5]: https://github.com/tintinweb/pi-subagents/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/tintinweb/pi-subagents/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/tintinweb/pi-subagents/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/tintinweb/pi-subagents/compare/v0.4.1...v0.4.2
