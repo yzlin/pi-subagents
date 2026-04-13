@@ -1622,61 +1622,86 @@ ${systemPrompt}
     ctx.ui.notify(`Created ${targetPath}`, "info");
   }
 
-  async function showSettings(ctx: ExtensionCommandContext) {
-    const choice = await ctx.ui.select("Settings", [
-      `Max concurrency (current: ${manager.getMaxConcurrent()})`,
-      `Default max turns (current: ${getDefaultMaxTurns() ?? "unlimited"})`,
-      `Grace turns (current: ${getGraceTurns()})`,
-      `Join mode (current: ${getDefaultJoinMode()})`,
-    ]);
-    if (!choice) return;
+  function getSettingsOptions() {
+    return [
+      { value: "max-concurrency", label: `Max concurrency (current: ${manager.getMaxConcurrent()})` },
+      { value: "default-max-turns", label: `Default max turns (current: ${getDefaultMaxTurns() ?? "unlimited"})` },
+      { value: "grace-turns", label: `Grace turns (current: ${getGraceTurns()})` },
+      { value: "join-mode", label: `Join mode (current: ${getDefaultJoinMode()})` },
+    ];
+  }
 
-    if (choice.startsWith("Max concurrency")) {
-      const val = await ctx.ui.input("Max concurrent background agents", String(manager.getMaxConcurrent()));
-      if (val) {
-        const n = parseInt(val, 10);
-        if (n >= 1) {
-          manager.setMaxConcurrent(n);
-          ctx.ui.notify(`Max concurrency set to ${n}`, "info");
-        } else {
-          ctx.ui.notify("Must be a positive integer.", "warning");
+  async function showSettings(ctx: ExtensionCommandContext, selectedSetting?: string) {
+    let currentSelection = selectedSetting;
+
+    while (true) {
+      const choice = await showRememberingSelect(ctx, "Settings", getSettingsOptions(), {
+        maxVisible: 6,
+        selectedValue: currentSelection,
+      });
+      if (!choice) return;
+
+      currentSelection = choice;
+
+      switch (choice) {
+        case "max-concurrency": {
+          const val = await ctx.ui.input("Max concurrent background agents", String(manager.getMaxConcurrent()));
+          if (val) {
+            const n = parseInt(val, 10);
+            if (n >= 1) {
+              manager.setMaxConcurrent(n);
+              ctx.ui.notify(`Max concurrency set to ${n}`, "info");
+            } else {
+              ctx.ui.notify("Must be a positive integer.", "warning");
+            }
+          }
+          break;
         }
-      }
-    } else if (choice.startsWith("Default max turns")) {
-      const val = await ctx.ui.input("Default max turns before wrap-up (0 = unlimited)", String(getDefaultMaxTurns() ?? 0));
-      if (val) {
-        const n = parseInt(val, 10);
-        if (n === 0) {
-          setDefaultMaxTurns(undefined);
-          ctx.ui.notify("Default max turns set to unlimited", "info");
-        } else if (n >= 1) {
-          setDefaultMaxTurns(n);
-          ctx.ui.notify(`Default max turns set to ${n}`, "info");
-        } else {
-          ctx.ui.notify("Must be 0 (unlimited) or a positive integer.", "warning");
+
+        case "default-max-turns": {
+          const val = await ctx.ui.input("Default max turns before wrap-up (0 = unlimited)", String(getDefaultMaxTurns() ?? 0));
+          if (val) {
+            const n = parseInt(val, 10);
+            if (n === 0) {
+              setDefaultMaxTurns(undefined);
+              ctx.ui.notify("Default max turns set to unlimited", "info");
+            } else if (n >= 1) {
+              setDefaultMaxTurns(n);
+              ctx.ui.notify(`Default max turns set to ${n}`, "info");
+            } else {
+              ctx.ui.notify("Must be 0 (unlimited) or a positive integer.", "warning");
+            }
+          }
+          break;
         }
-      }
-    } else if (choice.startsWith("Grace turns")) {
-      const val = await ctx.ui.input("Grace turns after wrap-up steer", String(getGraceTurns()));
-      if (val) {
-        const n = parseInt(val, 10);
-        if (n >= 1) {
-          setGraceTurns(n);
-          ctx.ui.notify(`Grace turns set to ${n}`, "info");
-        } else {
-          ctx.ui.notify("Must be a positive integer.", "warning");
+
+        case "grace-turns": {
+          const val = await ctx.ui.input("Grace turns after wrap-up steer", String(getGraceTurns()));
+          if (val) {
+            const n = parseInt(val, 10);
+            if (n >= 1) {
+              setGraceTurns(n);
+              ctx.ui.notify(`Grace turns set to ${n}`, "info");
+            } else {
+              ctx.ui.notify("Must be a positive integer.", "warning");
+            }
+          }
+          break;
         }
-      }
-    } else if (choice.startsWith("Join mode")) {
-      const val = await ctx.ui.select("Default join mode for background agents", [
-        "smart — auto-group 2+ agents in same turn (default)",
-        "async — always notify individually",
-        "group — always group background agents",
-      ]);
-      if (val) {
-        const mode = val.split(" ")[0] as JoinMode;
-        setDefaultJoinMode(mode);
-        ctx.ui.notify(`Default join mode set to ${mode}`, "info");
+
+        case "join-mode": {
+          const val = await ctx.ui.select("Default join mode for background agents", [
+            "smart — auto-group 2+ agents in same turn (default)",
+            "async — always notify individually",
+            "group — always group background agents",
+          ]);
+          if (val) {
+            const mode = val.split(" ")[0] as JoinMode;
+            setDefaultJoinMode(mode);
+            ctx.ui.notify(`Default join mode set to ${mode}`, "info");
+          }
+          break;
+        }
       }
     }
   }
