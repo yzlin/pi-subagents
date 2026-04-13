@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-13
+
 ### Changed
+- **Package renamed** — published package name is now `@yzlin/pi-subagents`.
+- **Fork metadata aligned** — package metadata and README now point to the `yzlin/pi-subagents` fork for repository, homepage, issues, and media assets.
+- **Original author credit added** — README and package metadata now explicitly credit [tintinweb](https://github.com/tintinweb) as the original author.
 - **Conversation viewer paging aliases** — in the running-agent detail overlay, `Ctrl+F` now matches Page Down and `Ctrl+B` now matches Page Up, consistent with the existing modal navigation aliases.
 
 ## [0.5.2] - 2026-03-26
@@ -348,6 +353,7 @@ Initial release.
 - **Thinking level** — per-agent extended thinking control
 - **`/agent` and `/agents` commands**
 
+[0.6.0]: https://github.com/yzlin/pi-subagents/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/tintinweb/pi-subagents/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/tintinweb/pi-subagents/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/tintinweb/pi-subagents/compare/v0.4.9...v0.5.0

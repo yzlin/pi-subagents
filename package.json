@@ -1,16 +1,19 @@
 {
-  "name": "@tintinweb/pi-subagents",
-  "version": "0.5.2",
+  "name": "@yzlin/pi-subagents",
+  "version": "0.6.0",
   "description": "A pi extension extension that brings smart Claude Code-style autonomous sub-agents to pi.",
-  "author": "tintinweb",
+  "author": "yzlin",
+  "contributors": [
+    "tintinweb (original author)"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/tintinweb/pi-subagents.git"
+    "url": "https://github.com/yzlin/pi-subagents.git"
   },
-  "homepage": "https://github.com/tintinweb/pi-subagents#readme",
+  "homepage": "https://github.com/yzlin/pi-subagents#readme",
   "bugs": {
-    "url": "https://github.com/tintinweb/pi-subagents/issues"
+    "url": "https://github.com/yzlin/pi-subagents/issues"
   },
   "keywords": [
     "pi-package",
@@ -45,7 +48,7 @@
     "extensions": [
       "./src/index.ts"
     ],
-    "video": "https://github.com/tintinweb/pi-subagents/raw/master/media/demo.mp4",
-    "image": "https://github.com/tintinweb/pi-subagents/raw/master/media/screenshot.png"
+    "video": "https://github.com/yzlin/pi-subagents/raw/master/media/demo.mp4",
+    "image": "https://github.com/yzlin/pi-subagents/raw/master/media/screenshot.png"
   }
 }
