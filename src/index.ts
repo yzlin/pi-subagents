@@ -41,6 +41,7 @@ import {
   SPINNER,
   type UICtx,
 } from "./ui/agent-widget.js";
+import { showRememberingSelect } from "./ui/remembering-select.js";
 
 export { formatAgentConfigTag };
 
@@ -1110,29 +1111,37 @@ Guidelines:
     return getModelLabelFromConfig(cfg.model);
   }
 
-  async function showAgentsMenu(ctx: ExtensionCommandContext) {
+  async function showAgentsMenu(ctx: ExtensionCommandContext, selectedMenuItem?: string) {
     reloadCustomAgents();
     const allNames = getAllTypes();
 
     // Build select options
-    const options: string[] = [];
+    const options: { value: string; label: string; description?: string }[] = [];
 
     // Running agents entry (only if there are active agents)
     const agents = manager.listAgents();
     if (agents.length > 0) {
       const running = agents.filter(a => a.status === "running" || a.status === "queued").length;
       const done = agents.filter(a => a.status === "completed" || a.status === "steered").length;
-      options.push(`Running agents (${agents.length}) — ${running} running, ${done} done`);
+      options.push({
+        value: "running-agents",
+        label: `Running agents (${agents.length})`,
+        description: `${running} running, ${done} done`,
+      });
     }
 
     // Agent types list
     if (allNames.length > 0) {
-      options.push(`Agent types (${allNames.length})`);
+      options.push({
+        value: "agent-types",
+        label: `Agent types (${allNames.length})`,
+        description: "Browse and manage built-in and custom agent types",
+      });
     }
 
     // Actions
-    options.push("Create new agent");
-    options.push("Settings");
+    options.push({ value: "create-agent", label: "Create new agent" });
+    options.push({ value: "settings", label: "Settings" });
 
     const noAgentsMsg = allNames.length === 0 && agents.length === 0
       ? "No agents found. Create specialized subagents that can be delegated to.\n\n" +
@@ -1144,24 +1153,27 @@ Guidelines:
       ctx.ui.notify(noAgentsMsg, "info");
     }
 
-    const choice = await ctx.ui.select("Agents", options);
+    const choice = await showRememberingSelect(ctx, "Agents", options, {
+      selectedValue: selectedMenuItem,
+      maxVisible: 8,
+    });
     if (!choice) return;
 
-    if (choice.startsWith("Running agents (")) {
+    if (choice === "running-agents") {
       await showRunningAgents(ctx);
-      await showAgentsMenu(ctx);
-    } else if (choice.startsWith("Agent types (")) {
+      await showAgentsMenu(ctx, choice);
+    } else if (choice === "agent-types") {
       await showAllAgentsList(ctx);
-      await showAgentsMenu(ctx);
-    } else if (choice === "Create new agent") {
+      await showAgentsMenu(ctx, choice);
+    } else if (choice === "create-agent") {
       await showCreateWizard(ctx);
-    } else if (choice === "Settings") {
+    } else if (choice === "settings") {
       await showSettings(ctx);
-      await showAgentsMenu(ctx);
+      await showAgentsMenu(ctx, choice);
     }
   }
 
-  async function showAllAgentsList(ctx: ExtensionCommandContext) {
+  async function showAllAgentsList(ctx: ExtensionCommandContext, selectedAgentName?: string) {
     const allNames = getAllTypes();
     if (allNames.length === 0) {
       ctx.ui.notify("No agents.", "info");
@@ -1178,40 +1190,37 @@ Guidelines:
       return "   ";
     };
 
-    const entries = allNames.map(name => {
+    const options = allNames.map(name => {
       const cfg = getAgentConfig(name);
       const disabled = cfg?.enabled === false;
       const model = getModelLabel(name, ctx.modelRegistry);
       const indicator = sourceIndicator(cfg);
-      const prefix = `${indicator}${name} · ${model}`;
-      const desc = disabled ? "(disabled)" : (cfg?.description ?? name);
-      return { name, prefix, desc };
+      return {
+        value: name,
+        label: `${indicator}${name} · ${model}`,
+        description: disabled ? "(disabled)" : (cfg?.description ?? name),
+      };
     });
-    const maxPrefix = Math.max(...entries.map(e => e.prefix.length));
 
     const hasCustom = allNames.some(n => { const c = getAgentConfig(n); return c && !c.isDefault && c.enabled !== false; });
     const hasDisabled = allNames.some(n => getAgentConfig(n)?.enabled === false);
     const legendParts: string[] = [];
     if (hasCustom) legendParts.push("• = project  ◦ = global");
     if (hasDisabled) legendParts.push("✕ = disabled");
-    const legend = legendParts.length ? "\n" + legendParts.join("  ") : "";
+    const infoLines = legendParts.length > 0 ? [legendParts.join("  ")] : [];
 
-    const options = entries.map(({ prefix, desc }) =>
-      `${prefix.padEnd(maxPrefix)} — ${desc}`,
-    );
-    if (legend) options.push(legend);
+    const agentName = await showRememberingSelect(ctx, "Agent types", options, {
+      selectedValue: selectedAgentName,
+      infoLines,
+      maxVisible: 12,
+    });
+    if (!agentName || !getAgentConfig(agentName)) return;
 
-    const choice = await ctx.ui.select("Agent types", options);
-    if (!choice) return;
-
-    const agentName = choice.split(" · ")[0].replace(/^[•◦✕\s]+/, "").trim();
-    if (getAgentConfig(agentName)) {
-      await showAgentDetail(ctx, agentName);
-      await showAllAgentsList(ctx);
-    }
+    await showAgentDetail(ctx, agentName);
+    await showAllAgentsList(ctx, agentName);
   }
 
-  async function showRunningAgents(ctx: ExtensionCommandContext) {
+  async function showRunningAgents(ctx: ExtensionCommandContext, selectedAgentId?: string) {
     const agents = manager.listAgents();
     if (agents.length === 0) {
       ctx.ui.notify("No agents.", "info");
@@ -1221,20 +1230,25 @@ Guidelines:
     const options = agents.map(a => {
       const dn = getDisplayName(a.type);
       const dur = formatDuration(a.startedAt, a.completedAt);
-      return `${dn} (${a.description}) · ${a.toolUses} tools · ${a.status} · ${dur}`;
+      return {
+        value: a.id,
+        label: `${dn} (${a.description})`,
+        description: `${a.toolUses} tools · ${a.status} · ${dur}`,
+      };
     });
 
-    const choice = await ctx.ui.select("Running agents", options);
-    if (!choice) return;
+    const selectedId = await showRememberingSelect(ctx, "Running agents", options, {
+      selectedValue: selectedAgentId,
+      maxVisible: 12,
+    });
+    if (!selectedId) return;
 
-    // Find the selected agent by matching the option index
-    const idx = options.indexOf(choice);
-    if (idx < 0) return;
-    const record = agents[idx];
+    const record = agents.find(agent => agent.id === selectedId);
+    if (!record) return;
 
     await viewAgentConversation(ctx, record);
     // Back-navigation: re-show the list
-    await showRunningAgents(ctx);
+    await showRunningAgents(ctx, selectedId);
   }
 
   async function viewAgentConversation(ctx: ExtensionCommandContext, record: AgentRecord) {
