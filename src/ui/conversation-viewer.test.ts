@@ -76,6 +76,56 @@ beforeEach(() => {
 });
 
 describe("ConversationViewer", () => {
+  describe("input aliases", () => {
+    const INPUT_CTRL_B = "\u0002";
+    const INPUT_CTRL_F = "\u0006";
+    const INNER_WIDTH = 76;
+    const VIEWPORT_HEIGHT = 4;
+
+    function createScrollableViewer(rows = 10, width = 80) {
+      const content = Array.from({ length: 12 }, (_unused, index) => `Line ${index + 1}`).join("\n");
+      const viewer = new ConversationViewer(
+        mockTui(rows, width),
+        mockSession([{ role: "toolResult", toolUseId: "t1", content: [{ type: "text", text: content }] }]),
+        mockRecord({ status: "running" }),
+        undefined,
+        ansiTheme(),
+        vi.fn(),
+      );
+      viewer.render(width);
+      return viewer;
+    }
+
+    function getScrollableState(viewer: InstanceType<typeof ConversationViewer>) {
+      const privateViewer = viewer as any;
+      const maxScroll = Math.max(0, privateViewer.buildContentLines(INNER_WIDTH).length - VIEWPORT_HEIGHT);
+      return { maxScroll, privateViewer };
+    }
+
+    it("maps ctrl+b to page up", () => {
+      const { maxScroll, privateViewer } = getScrollableState(createScrollableViewer());
+
+      expect(privateViewer.scrollOffset).toBe(maxScroll);
+
+      privateViewer.handleInput(INPUT_CTRL_B);
+
+      expect(privateViewer.scrollOffset).toBe(Math.max(0, maxScroll - VIEWPORT_HEIGHT));
+      expect(privateViewer.autoScroll).toBe(false);
+    });
+
+    it("maps ctrl+f to page down", () => {
+      const { maxScroll, privateViewer } = getScrollableState(createScrollableViewer());
+
+      privateViewer.scrollOffset = 0;
+      privateViewer.autoScroll = false;
+
+      privateViewer.handleInput(INPUT_CTRL_F);
+
+      expect(privateViewer.scrollOffset).toBe(Math.min(maxScroll, VIEWPORT_HEIGHT));
+      expect(privateViewer.autoScroll).toBe(false);
+    });
+  });
+
   describe("render width safety", () => {
     const widths = [40, 80, 120, 216];
 

@@ -16,6 +16,14 @@ import { type AgentActivity, describeActivity, formatDuration, formatTokens, get
 const CHROME_LINES = 6;
 const MIN_VIEWPORT = 3;
 
+function matchesPagingAlias(data: string, direction: "up" | "down"): boolean {
+  if (direction === "up") {
+    return matchesKey(data, "pageUp") || matchesKey(data, "ctrl+b");
+  }
+
+  return matchesKey(data, "pageDown") || matchesKey(data, "ctrl+f");
+}
+
 export class ConversationViewer implements Component {
   private scrollOffset = 0;
   private autoScroll = true;
@@ -54,10 +62,10 @@ export class ConversationViewer implements Component {
     } else if (matchesKey(data, "down") || matchesKey(data, "j")) {
       this.scrollOffset = Math.min(maxScroll, this.scrollOffset + 1);
       this.autoScroll = this.scrollOffset >= maxScroll;
-    } else if (matchesKey(data, "pageUp")) {
+    } else if (matchesPagingAlias(data, "up")) {
       this.scrollOffset = Math.max(0, this.scrollOffset - viewportHeight);
       this.autoScroll = false;
-    } else if (matchesKey(data, "pageDown")) {
+    } else if (matchesPagingAlias(data, "down")) {
       this.scrollOffset = Math.min(maxScroll, this.scrollOffset + viewportHeight);
       this.autoScroll = this.scrollOffset >= maxScroll;
     } else if (matchesKey(data, "home")) {
@@ -137,7 +145,7 @@ export class ConversationViewer implements Component {
       ? "100%"
       : `${Math.round(((visibleStart + viewportHeight) / contentLines.length) * 100)}%`;
     const footerLeft = th.fg("dim", `${contentLines.length} lines · ${scrollPct}`);
-    const footerRight = th.fg("dim", "↑↓ scroll · PgUp/PgDn · Esc close");
+    const footerRight = th.fg("dim", "↑↓/jk scroll · PgUp/PgDn/Ctrl+F/B · Esc close");
     const footerGap = Math.max(1, innerW - visibleWidth(footerLeft) - visibleWidth(footerRight));
     lines.push(row(footerLeft + " ".repeat(footerGap) + footerRight));
     lines.push(hrBot);

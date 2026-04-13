@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Conversation viewer paging aliases** — in the running-agent detail overlay, `Ctrl+F` now matches Page Down and `Ctrl+B` now matches Page Up, consistent with the existing modal navigation aliases.
+
 ## [0.5.2] - 2026-03-26
 
 ### Fixed
