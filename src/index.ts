@@ -31,6 +31,7 @@ import {
   type AgentDetails,
   AgentWidget,
   describeActivity,
+  formatAgentConfigTag,
   formatDuration,
   formatMs,
   formatTokens,
@@ -40,6 +41,8 @@ import {
   SPINNER,
   type UICtx,
 } from "./ui/agent-widget.js";
+
+export { formatAgentConfigTag };
 
 // ---- Shared helpers ----
 
@@ -149,7 +152,7 @@ function formatTaskNotification(record: AgentRecord, resultMaxLen: number): stri
 
 /** Build AgentDetails from a base + record-specific fields. */
 function buildDetails(
-  base: Pick<AgentDetails, "displayName" | "description" | "subagentType" | "modelName" | "tags">,
+  base: Pick<AgentDetails, "displayName" | "description" | "subagentType" | "modelName" | "thinkingLevel" | "tags">,
   record: { toolUses: number; startedAt: number; completedAt?: number; status: string; error?: string; id?: string; session?: any },
   activity?: AgentActivity,
   overrides?: Partial<AgentDetails>,
@@ -643,10 +646,11 @@ Guidelines:
         return new Text(text, 0, 0);
       }
 
-      // Helper: build "haiku · thinking: high · ⟳5≤30 · 3 tool uses · 33.8k tokens" stats string
+      // Helper: build "haiku:high · ⟳5≤30 · 3 tool uses · 33.8k tokens" stats string
       const stats = (d: AgentDetails) => {
         const parts: string[] = [];
-        if (d.modelName) parts.push(d.modelName);
+        const configTag = formatAgentConfigTag(d.modelName, d.thinkingLevel);
+        if (configTag) parts.push(configTag);
         if (d.tags) parts.push(...d.tags);
         if (d.turnCount != null && d.turnCount > 0) {
           parts.push(formatTurns(d.turnCount, d.maxTurns));
@@ -758,15 +762,13 @@ Guidelines:
       const isolation = resolvedConfig.isolation;
 
       // Build display tags for non-default config
-      const parentModelId = ctx.model?.id;
       const effectiveModelId = model?.id;
-      const agentModelName = effectiveModelId && effectiveModelId !== parentModelId
+      const agentModelName = effectiveModelId
         ? (model?.name ?? effectiveModelId).replace(/^Claude\s+/i, "").toLowerCase()
         : undefined;
       const agentTags: string[] = [];
       const modeLabel = getPromptModeLabel(subagentType);
       if (modeLabel) agentTags.push(modeLabel);
-      if (thinking) agentTags.push(`thinking: ${thinking}`);
       if (isolated) agentTags.push("isolated");
       if (isolation === "worktree") agentTags.push("worktree");
       const effectiveMaxTurns = normalizeMaxTurns(resolvedConfig.maxTurns ?? getDefaultMaxTurns());
@@ -776,6 +778,7 @@ Guidelines:
         description: params.description,
         subagentType,
         modelName: agentModelName,
+        thinkingLevel: thinking,
         tags: agentTags.length > 0 ? agentTags : undefined,
       };
 

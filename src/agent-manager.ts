@@ -13,6 +13,11 @@ import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
 import type { AgentRecord, IsolationMode, SubagentType, ThinkingLevel } from "./types.js";
 import { cleanupWorktree, createWorktree, pruneWorktrees, } from "./worktree.js";
 
+function getModelName(model?: Model<any>): string | undefined {
+  const label = model?.name ?? model?.id;
+  return label ? label.replace(/^Claude\s+/i, "").toLowerCase() : undefined;
+}
+
 export type OnAgentComplete = (record: AgentRecord) => void;
 export type OnAgentStart = (record: AgentRecord) => void;
 
@@ -96,6 +101,8 @@ export class AgentManager {
       type,
       description: options.description,
       status: options.isBackground ? "queued" : "running",
+      modelName: getModelName(options.model),
+      thinkingLevel: options.thinkingLevel,
       toolUses: 0,
       startedAt: Date.now(),
       abortController,
