@@ -7,6 +7,7 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
+
 import { isUnsafeName, safeReadFile } from "./memory.js";
 
 export interface PreloadedSkill {
@@ -22,22 +23,31 @@ export interface PreloadedSkill {
  * @param cwd         Working directory for project-level skills.
  * @returns Array of loaded skills (missing skills are skipped with a warning comment).
  */
-export function preloadSkills(skillNames: string[], cwd: string): PreloadedSkill[] {
+export function preloadSkills(
+  skillNames: string[],
+  cwd: string
+): PreloadedSkill[] {
   const results: PreloadedSkill[] = [];
 
   for (const name of skillNames) {
     // Unlike memory (which throws on unsafe names because it's part of agent setup),
     // skills are optional — skip gracefully to avoid blocking agent startup.
     if (isUnsafeName(name)) {
-      results.push({ name, content: `(Skill "${name}" skipped: name contains path traversal characters)` });
+      results.push({
+        name,
+        content: `(Skill "${name}" skipped: name contains path traversal characters)`,
+      });
       continue;
     }
     const content = findAndReadSkill(name, cwd);
-    if (content !== undefined) {
-      results.push({ name, content });
-    } else {
+    if (content === undefined) {
       // Include a note about missing skills so the agent knows it was requested but not found
-      results.push({ name, content: `(Skill "${name}" not found in .pi/skills/ or ~/.pi/skills/)` });
+      results.push({
+        name,
+        content: `(Skill "${name}" not found in .pi/skills/ or ~/.pi/skills/)`,
+      });
+    } else {
+      results.push({ name, content });
     }
   }
 
@@ -55,7 +65,9 @@ function findAndReadSkill(name: string, cwd: string): string | undefined {
   // Try project first, then global
   for (const dir of [projectDir, globalDir]) {
     const content = tryReadSkillFile(dir, name);
-    if (content !== undefined) return content;
+    if (content !== undefined) {
+      return content;
+    }
   }
 
   return undefined;
@@ -72,7 +84,9 @@ function tryReadSkillFile(dir: string, name: string): string | undefined {
     const path = join(dir, name + ext);
     // safeReadFile rejects symlinks to prevent reading arbitrary files
     const content = safeReadFile(path);
-    if (content !== undefined) return content.trim();
+    if (content !== undefined) {
+      return content.trim();
+    }
   }
 
   return undefined;

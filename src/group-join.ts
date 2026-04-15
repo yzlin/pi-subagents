@@ -8,7 +8,10 @@
 
 import type { AgentRecord } from "./types.js";
 
-export type DeliveryCallback = (records: AgentRecord[], partial: boolean) => void;
+export type DeliveryCallback = (
+  records: AgentRecord[],
+  partial: boolean
+) => void;
 
 interface AgentGroup {
   groupId: string;
@@ -26,13 +29,15 @@ const DEFAULT_TIMEOUT = 30_000;
 const STRAGGLER_TIMEOUT = 15_000;
 
 export class GroupJoinManager {
-  private groups = new Map<string, AgentGroup>();
-  private agentToGroup = new Map<string, string>();
+  private readonly groups = new Map<string, AgentGroup>();
+  private readonly agentToGroup = new Map<string, string>();
+  private readonly deliverCb: DeliveryCallback;
+  private readonly groupTimeout: number;
 
-  constructor(
-    private deliverCb: DeliveryCallback,
-    private groupTimeout = DEFAULT_TIMEOUT,
-  ) {}
+  constructor(deliverCb: DeliveryCallback, groupTimeout = DEFAULT_TIMEOUT) {
+    this.deliverCb = deliverCb;
+    this.groupTimeout = groupTimeout;
+  }
 
   /** Register a group of agent IDs that should be joined. */
   registerGroup(groupId: string, agentIds: string[]): void {
@@ -56,19 +61,23 @@ export class GroupJoinManager {
    * - 'held'      — result held, waiting for group completion
    * - 'delivered'  — this completion triggered the group notification
    */
-  onAgentComplete(record: AgentRecord): 'delivered' | 'held' | 'pass' {
+  onAgentComplete(record: AgentRecord): "delivered" | "held" | "pass" {
     const groupId = this.agentToGroup.get(record.id);
-    if (!groupId) return 'pass';
+    if (!groupId) {
+      return "pass";
+    }
 
     const group = this.groups.get(groupId);
-    if (!group || group.delivered) return 'pass';
+    if (!group || group.delivered) {
+      return "pass";
+    }
 
     group.completedRecords.set(record.id, record);
 
     // All done — deliver immediately
     if (group.completedRecords.size >= group.agentIds.size) {
       this.deliver(group, false);
-      return 'delivered';
+      return "delivered";
     }
 
     // First completion in this batch — start timeout
@@ -79,17 +88,21 @@ export class GroupJoinManager {
       }, timeout);
     }
 
-    return 'held';
+    return "held";
   }
 
   private onTimeout(group: AgentGroup): void {
-    if (group.delivered) return;
+    if (group.delivered) {
+      return;
+    }
     group.timeoutHandle = undefined;
 
     // Partial delivery — some agents still running
     const remaining = new Set<string>();
     for (const id of group.agentIds) {
-      if (!group.completedRecords.has(id)) remaining.add(id);
+      if (!group.completedRecords.has(id)) {
+        remaining.add(id);
+      }
     }
 
     // Clean up agentToGroup for delivered agents (they won't complete again)
@@ -119,7 +132,9 @@ export class GroupJoinManager {
 
   private cleanupGroup(groupId: string): void {
     const group = this.groups.get(groupId);
-    if (!group) return;
+    if (!group) {
+      return;
+    }
     for (const id of group.agentIds) {
       this.agentToGroup.delete(id);
     }
@@ -133,7 +148,9 @@ export class GroupJoinManager {
 
   dispose(): void {
     for (const group of this.groups.values()) {
-      if (group.timeoutHandle) clearTimeout(group.timeoutHandle);
+      if (group.timeoutHandle) {
+        clearTimeout(group.timeoutHandle);
+      }
     }
     this.groups.clear();
     this.agentToGroup.clear();

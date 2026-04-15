@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
+
 import type { AgentRecord } from "../src/types.js";
-import { type AgentActivity, AgentWidget, type Theme, type UICtx } from "../src/ui/agent-widget.js";
+import {
+  type AgentActivity,
+  AgentWidget,
+  type Theme,
+  type UICtx,
+} from "../src/ui/agent-widget.js";
 
 const theme: Theme = {
   fg: (_color, text) => text,
@@ -24,18 +30,23 @@ describe("AgentWidget", () => {
     };
 
     const activity = new Map<string, AgentActivity>([
-      ["agent-1", {
-        activeTools: new Map(),
-        toolUses: 1,
-        tokens: "",
-        responseText: "Tracing the root cause",
-        turnCount: 2,
-        maxTurns: 10,
-      }],
+      [
+        "agent-1",
+        {
+          activeTools: new Map(),
+          toolUses: 1,
+          tokens: "",
+          responseText: "Tracing the root cause",
+          turnCount: 2,
+          maxTurns: 10,
+        },
+      ],
     ]);
 
     let statusText: string | undefined;
-    let widgetFactory: ((tui: any, theme: Theme) => { render(): string[]; invalidate(): void }) | undefined;
+    let widgetFactory:
+      | Exclude<Parameters<UICtx["setWidget"]>[1], undefined>
+      | undefined;
 
     const uiCtx: UICtx = {
       setStatus: (_key, text) => {
@@ -57,7 +68,10 @@ describe("AgentWidget", () => {
     expect(statusText).toBe("1 running agent · haiku:high");
 
     expect(widgetFactory).toBeDefined();
-    const rendered = widgetFactory!({ terminal: { columns: 200 } }, theme).render();
+    const rendered = widgetFactory!(
+      { terminal: { columns: 200 } },
+      theme
+    ).render();
     expect(rendered[1]).toContain("haiku:high");
 
     vi.useRealTimers();

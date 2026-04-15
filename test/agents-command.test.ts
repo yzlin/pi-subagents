@@ -1,31 +1,41 @@
 import { describe, expect, it, vi } from "vitest";
-import registerExtension from "../src/index.js";
-import { type RememberingSelectOption, showRememberingSelect } from "../src/ui/remembering-select.js";
 
-type TestComponent = {
+import registerExtension from "../src/index.js";
+import {
+  type RememberingSelectOption,
+  showRememberingSelect,
+} from "../src/ui/remembering-select.js";
+
+interface TestComponent {
   handleInput?(data: string): void;
   render(width: number): string[];
-};
+}
 
 const TEST_THEME = {
   fg: (_color: string, text: string) => text,
   bold: (text: string) => text,
 };
 
-async function createTestComponent(factory: any, done: (value: string | undefined) => void): Promise<TestComponent> {
+function createTestComponent(
+  factory: any,
+  done: (value: string | undefined) => void
+): Promise<TestComponent> {
   return factory(
     { requestRender: vi.fn(), terminal: { columns: 120 } },
     TEST_THEME,
     {},
-    done,
+    done
   );
 }
 
 function getSelectedLine(component: TestComponent): string | undefined {
-  return component.render(120).find(line => line.includes("→ "));
+  return component.render(120).find((line) => line.includes("→ "));
 }
 
-function expectSelectedLine(component: TestComponent, expectedText: string): void {
+function expectSelectedLine(
+  component: TestComponent,
+  expectedText: string
+): void {
   expect(getSelectedLine(component)).toContain(expectedText);
 }
 
@@ -33,22 +43,35 @@ function getAgentsHandler(): (args: string[], ctx: any) => Promise<void> {
   let agentsHandler: ((args: string[], ctx: any) => Promise<void>) | undefined;
 
   registerExtension({
-    registerCommand: (name: string, command: { handler: (args: string[], ctx: any) => Promise<void> }) => {
-      if (name === "agents") agentsHandler = command.handler;
+    registerCommand: (
+      name: string,
+      command: { handler: (args: string[], ctx: any) => Promise<void> }
+    ) => {
+      if (name === "agents") {
+        agentsHandler = command.handler;
+      }
     },
     registerTool: vi.fn(),
     registerMessageRenderer: vi.fn(),
     sendMessage: vi.fn(),
     appendEntry: vi.fn(),
     on: vi.fn(),
-    events: { emit: vi.fn(), on: vi.fn(() => () => {}) },
+    events: {
+      emit: vi.fn(),
+      on: vi.fn(() => () => {
+        /* noop */
+      }),
+    },
   } as any);
 
   expect(agentsHandler).toBeDefined();
   return agentsHandler!;
 }
 
-async function renderRememberingSelect(options: RememberingSelectOption[], config?: { selectedValue?: string; maxVisible?: number }): Promise<TestComponent> {
+async function renderRememberingSelect(
+  options: RememberingSelectOption[],
+  config?: { selectedValue?: string; maxVisible?: number }
+): Promise<TestComponent> {
   let component: TestComponent | undefined;
 
   await showRememberingSelect(
@@ -62,7 +85,7 @@ async function renderRememberingSelect(options: RememberingSelectOption[], confi
     } as any,
     "Agents",
     options,
-    config,
+    config
   );
 
   expect(component).toBeDefined();
@@ -155,8 +178,10 @@ describe("/agents command", () => {
 
     let customCallCount = 0;
     const select = vi.fn(async () => undefined);
-    const input = vi.fn(async (title: string) => {
-      if (title === "Max concurrent background agents") return "6";
+    const input = vi.fn((title: string) => {
+      if (title === "Max concurrent background agents") {
+        return "6";
+      }
       return undefined;
     });
     const custom = vi.fn(async (factory: any) => {
@@ -208,7 +233,7 @@ describe("/agents command", () => {
         value: `item-${index + 1}`,
         label: `Item ${index + 1}`,
       })),
-      { maxVisible: 3 },
+      { maxVisible: 3 }
     );
 
     component.handleInput?.("j");
@@ -228,7 +253,7 @@ describe("/agents command", () => {
     const agentsHandler = getAgentsHandler();
 
     let customCallCount = 0;
-    const select = vi.fn(async (title: string) => {
+    const select = vi.fn((title: string) => {
       if (title === "Plan") {
         return "Back";
       }
@@ -248,15 +273,21 @@ describe("/agents command", () => {
 
       if (customCallCount === 1) {
         expect(lines[0]).toContain("╭");
-        expect(lines.some((line: string) => line.includes("Agents"))).toBe(true);
+        expect(lines.some((line: string) => line.includes("Agents"))).toBe(
+          true
+        );
         done("agent-types");
       } else if (customCallCount === 2) {
         done("Plan");
       } else if (customCallCount === 3) {
-        expect(lines.find((line: string) => line.includes("→ "))).toContain("Plan");
+        expect(lines.find((line: string) => line.includes("→ "))).toContain(
+          "Plan"
+        );
         done(undefined);
       } else if (customCallCount === 4) {
-        expect(lines.find((line: string) => line.includes("→ "))).toContain("Agent types");
+        expect(lines.find((line: string) => line.includes("→ "))).toContain(
+          "Agent types"
+        );
         done(undefined);
       }
 

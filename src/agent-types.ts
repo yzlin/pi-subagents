@@ -5,7 +5,6 @@
  * User agents override defaults with the same name. Disabled agents are kept but excluded from spawning.
  */
 
-import type { AgentTool } from "@mariozechner/pi-agent-core";
 import {
   createBashTool,
   createEditTool,
@@ -15,23 +14,31 @@ import {
   createReadTool,
   createWriteTool,
 } from "@mariozechner/pi-coding-agent";
+
 import { DEFAULT_AGENTS } from "./default-agents.js";
 import type { AgentConfig } from "./types.js";
 
-type ToolFactory = (cwd: string) => AgentTool<any>;
-
-const TOOL_FACTORIES: Record<string, ToolFactory> = {
-  read: (cwd) => createReadTool(cwd),
-  bash: (cwd) => createBashTool(cwd),
-  edit: (cwd) => createEditTool(cwd),
-  write: (cwd) => createWriteTool(cwd),
-  grep: (cwd) => createGrepTool(cwd),
-  find: (cwd) => createFindTool(cwd),
-  ls: (cwd) => createLsTool(cwd),
+const TOOL_FACTORIES = {
+  read: (cwd: string) => createReadTool(cwd),
+  bash: (cwd: string) => createBashTool(cwd),
+  edit: (cwd: string) => createEditTool(cwd),
+  write: (cwd: string) => createWriteTool(cwd),
+  grep: (cwd: string) => createGrepTool(cwd),
+  find: (cwd: string) => createFindTool(cwd),
+  ls: (cwd: string) => createLsTool(cwd),
 };
 
+type BuiltinToolName = keyof typeof TOOL_FACTORIES;
+type BuiltinTool = ReturnType<(typeof TOOL_FACTORIES)[BuiltinToolName]>;
+
+function isBuiltinToolName(name: string): name is BuiltinToolName {
+  return name in TOOL_FACTORIES;
+}
+
 /** All known built-in tool names, derived from the factory registry. */
-export const BUILTIN_TOOL_NAMES = Object.keys(TOOL_FACTORIES);
+export const BUILTIN_TOOL_NAMES = Object.keys(
+  TOOL_FACTORIES
+) as BuiltinToolName[];
 
 /** Unified runtime registry of all agents (defaults + user-defined). */
 const agents = new Map<string, AgentConfig>();
@@ -57,10 +64,14 @@ export function registerAgents(userAgents: Map<string, AgentConfig>): void {
 
 /** Case-insensitive key resolution. */
 function resolveKey(name: string): string | undefined {
-  if (agents.has(name)) return name;
+  if (agents.has(name)) {
+    return name;
+  }
   const lower = name.toLowerCase();
   for (const key of agents.keys()) {
-    if (key.toLowerCase() === lower) return key;
+    if (key.toLowerCase() === lower) {
+      return key;
+    }
   }
   return undefined;
 }
@@ -105,43 +116,55 @@ export function getUserAgentNames(): string[] {
 /** Check if a type is valid and enabled (case-insensitive). */
 export function isValidType(type: string): boolean {
   const key = resolveKey(type);
-  if (!key) return false;
+  if (!key) {
+    return false;
+  }
   return agents.get(key)?.enabled !== false;
 }
 
 /** Tool names required for memory management. */
-const MEMORY_TOOL_NAMES = ["read", "write", "edit"];
+const MEMORY_TOOL_NAMES: BuiltinToolName[] = ["read", "write", "edit"];
 
 /**
  * Get the tools needed for memory management (read, write, edit).
  * Only returns tools that are NOT already in the provided set.
  */
-export function getMemoryTools(cwd: string, existingToolNames: Set<string>): AgentTool<any>[] {
-  return MEMORY_TOOL_NAMES
-    .filter(n => !existingToolNames.has(n) && n in TOOL_FACTORIES)
-    .map(n => TOOL_FACTORIES[n](cwd));
+export function getMemoryTools(
+  cwd: string,
+  existingToolNames: Set<string>
+): BuiltinTool[] {
+  return MEMORY_TOOL_NAMES.filter(
+    (name) => !existingToolNames.has(name) && isBuiltinToolName(name)
+  ).map((name) => TOOL_FACTORIES[name](cwd));
 }
 
 /** Tool names needed for read-only memory access. */
-const READONLY_MEMORY_TOOL_NAMES = ["read"];
+const READONLY_MEMORY_TOOL_NAMES: BuiltinToolName[] = ["read"];
 
 /**
  * Get only the read tool for read-only memory access.
  * Only returns tools that are NOT already in the provided set.
  */
-export function getReadOnlyMemoryTools(cwd: string, existingToolNames: Set<string>): AgentTool<any>[] {
-  return READONLY_MEMORY_TOOL_NAMES
-    .filter(n => !existingToolNames.has(n) && n in TOOL_FACTORIES)
-    .map(n => TOOL_FACTORIES[n](cwd));
+export function getReadOnlyMemoryTools(
+  cwd: string,
+  existingToolNames: Set<string>
+): BuiltinTool[] {
+  return READONLY_MEMORY_TOOL_NAMES.filter(
+    (name) => !existingToolNames.has(name) && isBuiltinToolName(name)
+  ).map((name) => TOOL_FACTORIES[name](cwd));
 }
 
 /** Get built-in tools for a type (case-insensitive). */
-export function getToolsForType(type: string, cwd: string): AgentTool<any>[] {
+export function getToolsForType(type: string, cwd: string): BuiltinTool[] {
   const key = resolveKey(type);
   const raw = key ? agents.get(key) : undefined;
-  const config = raw?.enabled !== false ? raw : undefined;
-  const toolNames = config?.builtinToolNames?.length ? config.builtinToolNames : BUILTIN_TOOL_NAMES;
-  return toolNames.filter((n) => n in TOOL_FACTORIES).map((n) => TOOL_FACTORIES[n](cwd));
+  const config = raw?.enabled === false ? undefined : raw;
+  const toolNames = config?.builtinToolNames?.length
+    ? config.builtinToolNames
+    : BUILTIN_TOOL_NAMES;
+  return toolNames
+    .filter(isBuiltinToolName)
+    .map((name) => TOOL_FACTORIES[name](cwd));
 }
 
 /** Get config for a type (case-insensitive, returns a SubagentTypeConfig-compatible object). Falls back to general-purpose. */
@@ -189,4 +212,3 @@ export function getConfig(type: string): {
     promptMode: "append",
   };
 }
-

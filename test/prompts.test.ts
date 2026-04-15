@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+
 import { getAgentConfig, registerAgents } from "../src/agent-types.js";
 import { buildAgentPrompt } from "../src/prompts.js";
 import type { AgentConfig, EnvInfo } from "../src/types.js";
@@ -168,7 +169,12 @@ describe("buildAgentPrompt", () => {
       runInBackground: false,
       isolated: false,
     };
-    const prompt = buildAgentPrompt(config, "/workspace", env, "SECRET parent prompt content");
+    const prompt = buildAgentPrompt(
+      config,
+      "/workspace",
+      env,
+      "SECRET parent prompt content"
+    );
     expect(prompt).toContain("You are a standalone agent.");
     expect(prompt).not.toContain("SECRET parent prompt content");
     expect(prompt).not.toContain("<sub_agent_context>");
@@ -176,7 +182,12 @@ describe("buildAgentPrompt", () => {
 
   it("append mode bridge contains tool reminders", () => {
     const config = getDefaultConfig("general-purpose");
-    const prompt = buildAgentPrompt(config, "/workspace", env, "Parent prompt.");
+    const prompt = buildAgentPrompt(
+      config,
+      "/workspace",
+      env,
+      "Parent prompt."
+    );
     expect(prompt).toContain("Use the read tool instead of cat");
     expect(prompt).toContain("Use the edit tool instead of sed");
     expect(prompt).toContain("Use the grep tool instead of");
@@ -216,8 +227,16 @@ describe("buildAgentPrompt", () => {
       runInBackground: false,
       isolated: false,
     };
-    const extras = { memoryBlock: "# Agent Memory\nYou have persistent memory at /tmp/mem/" };
-    const prompt = buildAgentPrompt(config, "/workspace", env, undefined, extras);
+    const extras = {
+      memoryBlock: "# Agent Memory\nYou have persistent memory at /tmp/mem/",
+    };
+    const prompt = buildAgentPrompt(
+      config,
+      "/workspace",
+      env,
+      undefined,
+      extras
+    );
     expect(prompt).toContain("You are a memory agent.");
     expect(prompt).toContain("Agent Memory");
     expect(prompt).toContain("persistent memory");
@@ -237,7 +256,13 @@ describe("buildAgentPrompt", () => {
       isolated: false,
     };
     const extras = { memoryBlock: "# Agent Memory\nPersistent memory here." };
-    const prompt = buildAgentPrompt(config, "/workspace", env, "Parent prompt.", extras);
+    const prompt = buildAgentPrompt(
+      config,
+      "/workspace",
+      env,
+      "Parent prompt.",
+      extras
+    );
     expect(prompt).toContain("<sub_agent_context>");
     expect(prompt).toContain("Agent Memory");
     expect(prompt).toContain("Custom instructions.");
@@ -262,7 +287,13 @@ describe("buildAgentPrompt", () => {
         { name: "error-handling", content: "Handle errors gracefully." },
       ],
     };
-    const prompt = buildAgentPrompt(config, "/workspace", env, undefined, extras);
+    const prompt = buildAgentPrompt(
+      config,
+      "/workspace",
+      env,
+      undefined,
+      extras
+    );
     expect(prompt).toContain("Preloaded Skill: api-conventions");
     expect(prompt).toContain("Use REST endpoints.");
     expect(prompt).toContain("Preloaded Skill: error-handling");
@@ -286,7 +317,13 @@ describe("buildAgentPrompt", () => {
       memoryBlock: "# Memory\nRemember this.",
       skillBlocks: [{ name: "skill1", content: "Skill content." }],
     };
-    const prompt = buildAgentPrompt(config, "/workspace", env, undefined, extras);
+    const prompt = buildAgentPrompt(
+      config,
+      "/workspace",
+      env,
+      undefined,
+      extras
+    );
     expect(prompt).toContain("# Memory");
     expect(prompt).toContain("Preloaded Skill: skill1");
   });

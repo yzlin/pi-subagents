@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+
 import { AgentManager } from "../src/agent-manager.js";
 import type { AgentRecord } from "../src/types.js";
 
@@ -18,7 +19,7 @@ import { runAgent } from "../src/agent-runner.js";
 const mockPi = {} as any;
 const mockCtx = { cwd: "/tmp" } as any;
 
-const mockSession = () => ({ dispose: vi.fn() } as any);
+const mockSession = () => ({ dispose: vi.fn() }) as any;
 
 const resolvedRun = () =>
   vi.mocked(runAgent).mockResolvedValue({
@@ -130,13 +131,16 @@ describe("AgentManager — Bug 3 clearCompleted", () => {
     expect(manager.listAgents()).toHaveLength(0);
   });
 
-  it("clearCompleted does not remove running or queued agents", async () => {
+  it("clearCompleted does not remove running or queued agents", () => {
     // Use maxConcurrent=0 to keep agents queued, then spawn one running via foreground
     manager = new AgentManager(undefined, 1);
 
     // Mock runAgent to never resolve (keeps agent "running")
     vi.mocked(runAgent).mockImplementation(
-      () => new Promise(() => {}), // hangs forever
+      () =>
+        new Promise(() => {
+          /* intentionally pending */
+        }) // hangs forever
     );
 
     const id1 = manager.spawn(mockPi, mockCtx, "general-purpose", "test1", {

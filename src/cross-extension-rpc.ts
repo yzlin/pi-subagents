@@ -23,16 +23,24 @@ export type RpcReply<T = void> =
 /** RPC protocol version — bumped when the envelope or method contracts change. */
 export const PROTOCOL_VERSION = 2;
 
+type SpawnRpcOptions = Record<string, unknown>;
+
 /** Minimal AgentManager interface needed by the spawn/stop RPCs. */
 export interface SpawnCapable {
-  spawn(pi: unknown, ctx: unknown, type: string, prompt: string, options: any): string;
+  spawn(
+    pi: unknown,
+    ctx: unknown,
+    type: string,
+    prompt: string,
+    options: SpawnRpcOptions
+  ): string;
   abort(id: string): boolean;
 }
 
 export interface RpcDeps {
   events: EventBus;
-  pi: unknown;                    // passed through to manager.spawn
-  getCtx: () => unknown | undefined;  // returns current ExtensionContext
+  pi: unknown; // passed through to manager.spawn
+  getCtx: () => unknown | undefined; // returns current ExtensionContext
   manager: SpawnCapable;
 }
 
@@ -49,18 +57,21 @@ export interface RpcHandle {
 function handleRpc<P extends { requestId: string }>(
   events: EventBus,
   channel: string,
-  fn: (params: P) => unknown | Promise<unknown>,
+  fn: (params: P) => unknown | Promise<unknown>
 ): () => void {
   return events.on(channel, async (raw: unknown) => {
     const params = raw as P;
     try {
       const data = await fn(params);
       const reply: { success: true; data?: unknown } = { success: true };
-      if (data !== undefined) reply.data = data;
+      if (data !== undefined) {
+        reply.data = data;
+      }
       events.emit(`${channel}:reply:${params.requestId}`, reply);
-    } catch (err: any) {
+    } catch (err) {
       events.emit(`${channel}:reply:${params.requestId}`, {
-        success: false, error: err?.message ?? String(err),
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
       });
     }
   });
@@ -77,18 +88,27 @@ export function registerRpcHandlers(deps: RpcDeps): RpcHandle {
     return { version: PROTOCOL_VERSION };
   });
 
-  const unsubSpawn = handleRpc<{ requestId: string; type: string; prompt: string; options?: any }>(
-    events, "subagents:rpc:spawn", ({ type, prompt, options }) => {
-      const ctx = getCtx();
-      if (!ctx) throw new Error("No active session");
-      return { id: manager.spawn(pi, ctx, type, prompt, options ?? {}) };
-    },
-  );
+  const unsubSpawn = handleRpc<{
+    requestId: string;
+    type: string;
+    prompt: string;
+    options?: SpawnRpcOptions;
+  }>(events, "subagents:rpc:spawn", ({ type, prompt, options }) => {
+    const ctx = getCtx();
+    if (!ctx) {
+      throw new Error("No active session");
+    }
+    return { id: manager.spawn(pi, ctx, type, prompt, options ?? {}) };
+  });
 
   const unsubStop = handleRpc<{ requestId: string; agentId: string }>(
-    events, "subagents:rpc:stop", ({ agentId }) => {
-      if (!manager.abort(agentId)) throw new Error("Agent not found");
-    },
+    events,
+    "subagents:rpc:stop",
+    ({ agentId }) => {
+      if (!manager.abort(agentId)) {
+        throw new Error("Agent not found");
+      }
+    }
   );
 
   return { unsubPing, unsubSpawn, unsubStop };

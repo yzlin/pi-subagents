@@ -5,7 +5,9 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
+
 import { parseFrontmatter } from "@mariozechner/pi-coding-agent";
+
 import { BUILTIN_TOOL_NAMES } from "./agent-types.js";
 import type { AgentConfig, MemoryScope, ThinkingLevel } from "./types.js";
 
@@ -23,18 +25,24 @@ export function loadCustomAgents(cwd: string): Map<string, AgentConfig> {
   const projectDir = join(cwd, ".pi", "agents");
 
   const agents = new Map<string, AgentConfig>();
-  loadFromDir(globalDir, agents, "global");   // lower priority
-  loadFromDir(projectDir, agents, "project");  // higher priority (overwrites)
+  loadFromDir(globalDir, agents, "global"); // lower priority
+  loadFromDir(projectDir, agents, "project"); // higher priority (overwrites)
   return agents;
 }
 
 /** Load agent configs from a directory into the map. */
-function loadFromDir(dir: string, agents: Map<string, AgentConfig>, source: "project" | "global"): void {
-  if (!existsSync(dir)) return;
+function loadFromDir(
+  dir: string,
+  agents: Map<string, AgentConfig>,
+  source: "project" | "global"
+): void {
+  if (!existsSync(dir)) {
+    return;
+  }
 
   let files: string[];
   try {
-    files = readdirSync(dir).filter(f => f.endsWith(".md"));
+    files = readdirSync(dir).filter((f) => f.endsWith(".md"));
   } catch {
     return;
   }
@@ -49,7 +57,8 @@ function loadFromDir(dir: string, agents: Map<string, AgentConfig>, source: "pro
       continue;
     }
 
-    const { frontmatter: fm, body } = parseFrontmatter<Record<string, unknown>>(content);
+    const { frontmatter: fm, body } =
+      parseFrontmatter<Record<string, unknown>>(content);
 
     agents.set(name, {
       name,
@@ -64,12 +73,16 @@ function loadFromDir(dir: string, agents: Map<string, AgentConfig>, source: "pro
       maxTurns: nonNegativeInt(fm.max_turns),
       systemPrompt: body.trim(),
       promptMode: fm.prompt_mode === "append" ? "append" : "replace",
-      inheritContext: fm.inherit_context != null ? fm.inherit_context === true : undefined,
-      runInBackground: fm.run_in_background != null ? fm.run_in_background === true : undefined,
-      isolated: fm.isolated != null ? fm.isolated === true : undefined,
+      inheritContext:
+        fm.inherit_context == null ? undefined : fm.inherit_context === true,
+      runInBackground:
+        fm.run_in_background == null
+          ? undefined
+          : fm.run_in_background === true,
+      isolated: fm.isolated == null ? undefined : fm.isolated === true,
       memory: parseMemory(fm.memory),
       isolation: fm.isolation === "worktree" ? "worktree" : undefined,
-      enabled: fm.enabled !== false,  // default true; explicitly false disables
+      enabled: fm.enabled !== false, // default true; explicitly false disables
       source,
     });
   }
@@ -92,10 +105,17 @@ function nonNegativeInt(val: unknown): number | undefined {
  * Parse a raw CSV field value into items, or undefined if absent/empty/"none".
  */
 function parseCsvField(val: unknown): string[] | undefined {
-  if (val === undefined || val === null) return undefined;
+  if (val === undefined || val === null) {
+    return undefined;
+  }
   const s = String(val).trim();
-  if (!s || s === "none") return undefined;
-  const items = s.split(",").map(t => t.trim()).filter(Boolean);
+  if (!s || s === "none") {
+    return undefined;
+  }
+  const items = s
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
   return items.length > 0 ? items : undefined;
 }
 
@@ -104,7 +124,9 @@ function parseCsvField(val: unknown): string[] | undefined {
  * omitted → defaults; "none"/empty → []; csv → listed items.
  */
 function csvList(val: unknown, defaults: string[]): string[] {
-  if (val === undefined || val === null) return defaults;
+  if (val === undefined || val === null) {
+    return defaults;
+  }
   return parseCsvField(val) ?? [];
 }
 
@@ -121,7 +143,9 @@ function csvListOptional(val: unknown): string[] | undefined {
  * omitted → undefined; "user"/"project"/"local" → MemoryScope.
  */
 function parseMemory(val: unknown): MemoryScope | undefined {
-  if (val === "user" || val === "project" || val === "local") return val;
+  if (val === "user" || val === "project" || val === "local") {
+    return val;
+  }
   return undefined;
 }
 
@@ -130,8 +154,12 @@ function parseMemory(val: unknown): MemoryScope | undefined {
  * omitted/true → true (inherit all); false/"none"/empty → false; csv → listed names.
  */
 function inheritField(val: unknown): true | string[] | false {
-  if (val === undefined || val === null || val === true) return true;
-  if (val === false || val === "none") return false;
+  if (val === undefined || val === null || val === true) {
+    return true;
+  }
+  if (val === false || val === "none") {
+    return false;
+  }
   const items = csvList(val, []);
   return items.length > 0 ? items : false;
 }

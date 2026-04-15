@@ -1,19 +1,27 @@
 import { describe, expect, it } from "vitest";
+
 import { type ModelRegistry, resolveModel } from "../src/model-resolver.js";
 
 // Mock model entries matching typical pi model registry shape
 const MODELS = [
   { id: "claude-opus-4-6", name: "Claude Opus 4.6", provider: "anthropic" },
   { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", provider: "anthropic" },
-  { id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5", provider: "anthropic" },
+  {
+    id: "claude-haiku-4-5-20251001",
+    name: "Claude Haiku 4.5",
+    provider: "anthropic",
+  },
   { id: "gpt-4o", name: "GPT-4o", provider: "openai" },
   { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", provider: "google" },
 ];
 
-function makeRegistry(models = MODELS, available?: typeof MODELS): ModelRegistry {
+function makeRegistry(
+  models = MODELS,
+  available?: typeof MODELS
+): ModelRegistry {
   return {
     find(provider: string, modelId: string) {
-      return models.find(m => m.provider === provider && m.id === modelId);
+      return models.find((m) => m.provider === provider && m.id === modelId);
     },
     getAll() {
       return models;
@@ -156,7 +164,10 @@ describe("resolveModel", () => {
 
     it("exact match fails when model is not in getAvailable (no auth)", () => {
       const available = [MODELS[0]]; // only opus available
-      const result = resolveModel("anthropic/claude-sonnet-4-6", makeRegistry(MODELS, available));
+      const result = resolveModel(
+        "anthropic/claude-sonnet-4-6",
+        makeRegistry(MODELS, available)
+      );
       expect(typeof result).toBe("string");
       expect(result).toContain("Model not found");
     });
@@ -170,9 +181,21 @@ describe("resolveModel", () => {
 
   describe("ambiguous matches", () => {
     const SIMILAR_MODELS = [
-      { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", provider: "anthropic" },
-      { id: "claude-sonnet-4-5-20241022", name: "Claude Sonnet 4.5", provider: "anthropic" },
-      { id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5", provider: "anthropic" },
+      {
+        id: "claude-sonnet-4-6",
+        name: "Claude Sonnet 4.6",
+        provider: "anthropic",
+      },
+      {
+        id: "claude-sonnet-4-5-20241022",
+        name: "Claude Sonnet 4.5",
+        provider: "anthropic",
+      },
+      {
+        id: "claude-haiku-4-5-20251001",
+        name: "Claude Haiku 4.5",
+        provider: "anthropic",
+      },
     ];
 
     it("'sonnet' prefers tighter id match (shorter id)", () => {

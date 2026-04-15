@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+
 import {
   BUILTIN_TOOL_NAMES,
   getAgentConfig,
@@ -83,7 +84,13 @@ describe("agent type registry", () => {
 
     it("Explore has read-only tools", () => {
       const config = getConfig("Explore");
-      expect(config.builtinToolNames).toEqual(["read", "bash", "grep", "find", "ls"]);
+      expect(config.builtinToolNames).toEqual([
+        "read",
+        "bash",
+        "grep",
+        "find",
+        "ls",
+      ]);
       expect(config.builtinToolNames).not.toContain("edit");
       expect(config.builtinToolNames).not.toContain("write");
     });
@@ -119,7 +126,12 @@ describe("agent type registry", () => {
 
   describe("user agents", () => {
     it("registers and retrieves user agents", () => {
-      const agents = new Map([["auditor", makeAgentConfig({ name: "auditor", description: "Auditor" })]]);
+      const agents = new Map([
+        [
+          "auditor",
+          makeAgentConfig({ name: "auditor", description: "Auditor" }),
+        ],
+      ]);
       registerAgents(agents);
 
       expect(isValidType("auditor")).toBe(true);
@@ -127,7 +139,9 @@ describe("agent type registry", () => {
     });
 
     it("includes user agents in available types", () => {
-      const agents = new Map([["auditor", makeAgentConfig({ name: "auditor" })]]);
+      const agents = new Map([
+        ["auditor", makeAgentConfig({ name: "auditor" })],
+      ]);
       registerAgents(agents);
 
       const types = getAvailableTypes();
@@ -149,13 +163,18 @@ describe("agent type registry", () => {
     });
 
     it("getConfig returns config for user agents", () => {
-      const agents = new Map([["auditor", makeAgentConfig({
-        name: "auditor",
-        description: "Security auditor",
-        builtinToolNames: ["read", "grep"],
-        extensions: false,
-        skills: true,
-      })]]);
+      const agents = new Map([
+        [
+          "auditor",
+          makeAgentConfig({
+            name: "auditor",
+            description: "Security auditor",
+            builtinToolNames: ["read", "grep"],
+            extensions: false,
+            skills: true,
+          }),
+        ],
+      ]);
       registerAgents(agents);
 
       const config = getConfig("auditor");
@@ -167,11 +186,16 @@ describe("agent type registry", () => {
     });
 
     it("getConfig returns extension allowlist for user agents", () => {
-      const agents = new Map([["partial", makeAgentConfig({
-        name: "partial",
-        extensions: ["web-search"],
-        skills: ["planning"],
-      })]]);
+      const agents = new Map([
+        [
+          "partial",
+          makeAgentConfig({
+            name: "partial",
+            extensions: ["web-search"],
+            skills: ["planning"],
+          }),
+        ],
+      ]);
       registerAgents(agents);
 
       const config = getConfig("partial");
@@ -180,10 +204,15 @@ describe("agent type registry", () => {
     });
 
     it("getToolsForType works for user agents", () => {
-      const agents = new Map([["auditor", makeAgentConfig({
-        name: "auditor",
-        builtinToolNames: ["read", "grep", "find"],
-      })]]);
+      const agents = new Map([
+        [
+          "auditor",
+          makeAgentConfig({
+            name: "auditor",
+            builtinToolNames: ["read", "grep", "find"],
+          }),
+        ],
+      ]);
       registerAgents(agents);
 
       const tools = getToolsForType("auditor", "/tmp");
@@ -193,11 +222,15 @@ describe("agent type registry", () => {
     it("getConfig falls back to general-purpose for unknown types", () => {
       const config = getConfig("nonexistent");
       expect(config.displayName).toBe("Agent");
-      expect(config.description).toBe("General-purpose agent for complex, multi-step tasks");
+      expect(config.description).toBe(
+        "General-purpose agent for complex, multi-step tasks"
+      );
     });
 
     it("clearing user agents works (defaults remain)", () => {
-      const agents = new Map([["auditor", makeAgentConfig({ name: "auditor" })]]);
+      const agents = new Map([
+        ["auditor", makeAgentConfig({ name: "auditor" })],
+      ]);
       registerAgents(agents);
       expect(isValidType("auditor")).toBe(true);
 
@@ -207,11 +240,16 @@ describe("agent type registry", () => {
     });
 
     it("user agent overrides default with same name", () => {
-      const agents = new Map([["Explore", makeAgentConfig({
-        name: "Explore",
-        description: "Custom Explore",
-        builtinToolNames: BUILTIN_TOOL_NAMES,
-      })]]);
+      const agents = new Map([
+        [
+          "Explore",
+          makeAgentConfig({
+            name: "Explore",
+            description: "Custom Explore",
+            builtinToolNames: BUILTIN_TOOL_NAMES,
+          }),
+        ],
+      ]);
       registerAgents(agents);
 
       const config = getConfig("Explore");
@@ -220,10 +258,15 @@ describe("agent type registry", () => {
     });
 
     it("disabled agent is excluded from available types", () => {
-      const agents = new Map([["Plan", makeAgentConfig({
-        name: "Plan",
-        enabled: false,
-      })]]);
+      const agents = new Map([
+        [
+          "Plan",
+          makeAgentConfig({
+            name: "Plan",
+            enabled: false,
+          }),
+        ],
+      ]);
       registerAgents(agents);
 
       expect(isValidType("Plan")).toBe(false);
@@ -231,10 +274,15 @@ describe("agent type registry", () => {
     });
 
     it("general-purpose can be disabled but fallback still works", () => {
-      const agents = new Map([["general-purpose", makeAgentConfig({
-        name: "general-purpose",
-        enabled: false,
-      })]]);
+      const agents = new Map([
+        [
+          "general-purpose",
+          makeAgentConfig({
+            name: "general-purpose",
+            enabled: false,
+          }),
+        ],
+      ]);
       registerAgents(agents);
 
       expect(isValidType("general-purpose")).toBe(false);
@@ -247,7 +295,7 @@ describe("agent type registry", () => {
   describe("getMemoryTools", () => {
     it("returns read, write, edit when none exist", () => {
       const tools = getMemoryTools("/tmp", new Set());
-      const names = tools.map(t => t.name);
+      const names = tools.map((t) => t.name);
       expect(names).toContain("read");
       expect(names).toContain("write");
       expect(names).toContain("edit");
@@ -256,7 +304,7 @@ describe("agent type registry", () => {
 
     it("skips tools that already exist", () => {
       const tools = getMemoryTools("/tmp", new Set(["read", "edit"]));
-      const names = tools.map(t => t.name);
+      const names = tools.map((t) => t.name);
       expect(names).toEqual(["write"]);
     });
 
@@ -269,7 +317,7 @@ describe("agent type registry", () => {
   describe("getReadOnlyMemoryTools", () => {
     it("returns only read when missing", () => {
       const tools = getReadOnlyMemoryTools("/tmp", new Set());
-      const names = tools.map(t => t.name);
+      const names = tools.map((t) => t.name);
       expect(names).toEqual(["read"]);
     });
 

@@ -1,8 +1,26 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { buildMemoryBlock, buildReadOnlyMemoryBlock, ensureMemoryDir, isSymlink, isUnsafeName, readMemoryIndex, resolveMemoryDir, safeReadFile } from "../src/memory.js";
+
+import {
+  buildMemoryBlock,
+  buildReadOnlyMemoryBlock,
+  ensureMemoryDir,
+  isSymlink,
+  isUnsafeName,
+  readMemoryIndex,
+  resolveMemoryDir,
+  safeReadFile,
+} from "../src/memory.js";
 
 describe("memory", () => {
   let tmpDir: string;
@@ -33,35 +51,51 @@ describe("memory", () => {
     });
 
     it("throws on names with path traversal (..)", () => {
-      expect(() => resolveMemoryDir("../../etc/evil", "project", "/workspace")).toThrow("Unsafe agent name");
+      expect(() =>
+        resolveMemoryDir("../../etc/evil", "project", "/workspace")
+      ).toThrow("Unsafe agent name");
     });
 
     it("throws on names with forward slash", () => {
-      expect(() => resolveMemoryDir("foo/bar", "project", "/workspace")).toThrow("Unsafe agent name");
+      expect(() =>
+        resolveMemoryDir("foo/bar", "project", "/workspace")
+      ).toThrow("Unsafe agent name");
     });
 
     it("throws on names with backslash", () => {
-      expect(() => resolveMemoryDir("foo\\bar", "project", "/workspace")).toThrow("Unsafe agent name");
+      expect(() =>
+        resolveMemoryDir("foo\\bar", "project", "/workspace")
+      ).toThrow("Unsafe agent name");
     });
 
     it("throws on names with null byte", () => {
-      expect(() => resolveMemoryDir("foo\0bar", "project", "/workspace")).toThrow("Unsafe agent name");
+      expect(() =>
+        resolveMemoryDir("foo\0bar", "project", "/workspace")
+      ).toThrow("Unsafe agent name");
     });
 
     it("throws on empty name", () => {
-      expect(() => resolveMemoryDir("", "project", "/workspace")).toThrow("Unsafe agent name");
+      expect(() => resolveMemoryDir("", "project", "/workspace")).toThrow(
+        "Unsafe agent name"
+      );
     });
 
     it("throws on names starting with dot", () => {
-      expect(() => resolveMemoryDir(".hidden", "project", "/workspace")).toThrow("Unsafe agent name");
+      expect(() =>
+        resolveMemoryDir(".hidden", "project", "/workspace")
+      ).toThrow("Unsafe agent name");
     });
 
     it("throws on names with spaces", () => {
-      expect(() => resolveMemoryDir("foo bar", "project", "/workspace")).toThrow("Unsafe agent name");
+      expect(() =>
+        resolveMemoryDir("foo bar", "project", "/workspace")
+      ).toThrow("Unsafe agent name");
     });
 
     it("allows hyphens, underscores, and dots in names", () => {
-      expect(() => resolveMemoryDir("my-agent_v2.1", "project", "/workspace")).not.toThrow();
+      expect(() =>
+        resolveMemoryDir("my-agent_v2.1", "project", "/workspace")
+      ).not.toThrow();
     });
   });
 
@@ -120,7 +154,9 @@ describe("memory", () => {
       const linkDir = join(tmpDir, "symlink-dir");
       mkdirSync(realDir, { recursive: true });
       symlinkSync(realDir, linkDir);
-      expect(() => ensureMemoryDir(linkDir)).toThrow("symlinked memory directory");
+      expect(() => ensureMemoryDir(linkDir)).toThrow(
+        "symlinked memory directory"
+      );
     });
   });
 
@@ -171,7 +207,10 @@ describe("memory", () => {
     });
 
     it("reads MEMORY.md content", () => {
-      writeFileSync(join(tmpDir, "MEMORY.md"), "# Memories\n- Item 1\n- Item 2");
+      writeFileSync(
+        join(tmpDir, "MEMORY.md"),
+        "# Memories\n- Item 1\n- Item 2"
+      );
       const result = readMemoryIndex(tmpDir);
       expect(result).toBe("# Memories\n- Item 1\n- Item 2");
     });
@@ -247,9 +286,15 @@ describe("memory", () => {
     });
 
     it("includes scope label in header", () => {
-      expect(buildMemoryBlock("a", "project", tmpDir)).toContain("Memory scope: project");
-      expect(buildMemoryBlock("a", "local", tmpDir)).toContain("Memory scope: local");
-      expect(buildMemoryBlock("a", "user", tmpDir)).toContain("Memory scope: user");
+      expect(buildMemoryBlock("a", "project", tmpDir)).toContain(
+        "Memory scope: project"
+      );
+      expect(buildMemoryBlock("a", "local", tmpDir)).toContain(
+        "Memory scope: local"
+      );
+      expect(buildMemoryBlock("a", "user", tmpDir)).toContain(
+        "Memory scope: user"
+      );
     });
   });
 
@@ -285,9 +330,15 @@ describe("memory", () => {
     });
 
     it("includes scope label in header", () => {
-      expect(buildReadOnlyMemoryBlock("a", "project", tmpDir)).toContain("Memory scope: project");
-      expect(buildReadOnlyMemoryBlock("a", "local", tmpDir)).toContain("Memory scope: local");
-      expect(buildReadOnlyMemoryBlock("a", "user", tmpDir)).toContain("Memory scope: user");
+      expect(buildReadOnlyMemoryBlock("a", "project", tmpDir)).toContain(
+        "Memory scope: project"
+      );
+      expect(buildReadOnlyMemoryBlock("a", "local", tmpDir)).toContain(
+        "Memory scope: local"
+      );
+      expect(buildReadOnlyMemoryBlock("a", "user", tmpDir)).toContain(
+        "Memory scope: user"
+      );
     });
 
     it("does not mention memory directory path for write access", () => {

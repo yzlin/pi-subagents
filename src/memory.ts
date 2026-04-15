@@ -9,19 +9,23 @@
 
 import { existsSync, lstatSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, } from "node:path";
+import { join } from "node:path";
+
 import type { MemoryScope } from "./types.js";
 
 /** Maximum lines to read from MEMORY.md */
 const MAX_MEMORY_LINES = 200;
+const SAFE_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 
 /**
  * Returns true if a name contains characters not allowed in agent/skill names.
  * Uses a whitelist: only alphanumeric, hyphens, underscores, and dots (no leading dot).
  */
 export function isUnsafeName(name: string): boolean {
-  if (!name || name.length > 128) return true;
-  return !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name);
+  if (!name || name.length > 128) {
+    return true;
+  }
+  return !SAFE_NAME_RE.test(name);
 }
 
 /**
@@ -40,8 +44,12 @@ export function isSymlink(filePath: string): boolean {
  * Returns undefined if the file doesn't exist, is a symlink, or can't be read.
  */
 export function safeReadFile(filePath: string): string | undefined {
-  if (!existsSync(filePath)) return undefined;
-  if (isSymlink(filePath)) return undefined;
+  if (!existsSync(filePath)) {
+    return undefined;
+  }
+  if (isSymlink(filePath)) {
+    return undefined;
+  }
   try {
     return readFileSync(filePath, "utf-8");
   } catch {
@@ -53,7 +61,11 @@ export function safeReadFile(filePath: string): string | undefined {
  * Resolve the memory directory path for a given agent + scope + cwd.
  * Throws if agentName contains path traversal characters.
  */
-export function resolveMemoryDir(agentName: string, scope: MemoryScope, cwd: string): string {
+export function resolveMemoryDir(
+  agentName: string,
+  scope: MemoryScope,
+  cwd: string
+): string {
   if (isUnsafeName(agentName)) {
     throw new Error(`Unsafe agent name for memory directory: "${agentName}"`);
   }
@@ -76,7 +88,9 @@ export function ensureMemoryDir(memoryDir: string): void {
   // If the directory already exists, verify it's not a symlink
   if (existsSync(memoryDir)) {
     if (isSymlink(memoryDir)) {
-      throw new Error(`Refusing to use symlinked memory directory: ${memoryDir}`);
+      throw new Error(
+        `Refusing to use symlinked memory directory: ${memoryDir}`
+      );
     }
     return;
   }
@@ -89,15 +103,22 @@ export function ensureMemoryDir(memoryDir: string): void {
  */
 export function readMemoryIndex(memoryDir: string): string | undefined {
   // Reject symlinked memory directories
-  if (isSymlink(memoryDir)) return undefined;
+  if (isSymlink(memoryDir)) {
+    return undefined;
+  }
 
   const memoryFile = join(memoryDir, "MEMORY.md");
   const content = safeReadFile(memoryFile);
-  if (content === undefined) return undefined;
+  if (content === undefined) {
+    return undefined;
+  }
 
   const lines = content.split("\n");
   if (lines.length > MAX_MEMORY_LINES) {
-    return lines.slice(0, MAX_MEMORY_LINES).join("\n") + "\n... (truncated at 200 lines)";
+    return (
+      lines.slice(0, MAX_MEMORY_LINES).join("\n") +
+      "\n... (truncated at 200 lines)"
+    );
   }
   return content;
 }
@@ -106,7 +127,11 @@ export function readMemoryIndex(memoryDir: string): string | undefined {
  * Build the memory block to inject into the agent's system prompt.
  * Also ensures the memory directory exists (creates it if needed).
  */
-export function buildMemoryBlock(agentName: string, scope: MemoryScope, cwd: string): string {
+export function buildMemoryBlock(
+  agentName: string,
+  scope: MemoryScope,
+  cwd: string
+): string {
   const memoryDir = resolveMemoryDir(agentName, scope, cwd);
   // Create the memory directory so the agent can immediately write to it
   ensureMemoryDir(memoryDir);
@@ -148,7 +173,11 @@ This memory persists across sessions. Use it to build up knowledge over time.`;
  * Build a read-only memory block for agents that lack write/edit tools.
  * Does NOT create the memory directory — agents can only consume existing memory.
  */
-export function buildReadOnlyMemoryBlock(agentName: string, scope: MemoryScope, cwd: string): string {
+export function buildReadOnlyMemoryBlock(
+  agentName: string,
+  scope: MemoryScope,
+  cwd: string
+): string {
   const memoryDir = resolveMemoryDir(agentName, scope, cwd);
   const existingMemory = readMemoryIndex(memoryDir);
 
@@ -159,7 +188,7 @@ You have read-only access to memory. You can reference existing memories but can
 
   const memoryContent = existingMemory
     ? `\n\n## Current MEMORY.md\n${existingMemory}`
-    : `\n\nNo memory is available yet. Other agents or sessions with write access can create memories for you to consume.`;
+    : "\n\nNo memory is available yet. Other agents or sessions with write access can create memories for you to consume.";
 
   return header + memoryContent;
 }

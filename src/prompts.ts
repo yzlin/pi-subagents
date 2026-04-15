@@ -27,7 +27,7 @@ export function buildAgentPrompt(
   cwd: string,
   env: EnvInfo,
   parentSystemPrompt?: string,
-  extras?: PromptExtras,
+  extras?: PromptExtras
 ): string {
   const envBlock = `# Environment
 Working directory: ${cwd}
@@ -41,10 +41,13 @@ Platform: ${env.platform}`;
   }
   if (extras?.skillBlocks?.length) {
     for (const skill of extras.skillBlocks) {
-      extraSections.push(`\n# Preloaded Skill: ${skill.name}\n${skill.content}`);
+      extraSections.push(
+        `\n# Preloaded Skill: ${skill.name}\n${skill.content}`
+      );
     }
   }
-  const extrasSuffix = extraSections.length > 0 ? "\n\n" + extraSections.join("\n") : "";
+  const extrasSuffix =
+    extraSections.length > 0 ? `\n\n${extraSections.join("\n")}` : "";
 
   if (config.promptMode === "append") {
     const identity = parentSystemPrompt || genericBase;
@@ -66,7 +69,15 @@ You are operating as a sub-agent invoked to handle a specific task.
       ? `\n\n<agent_instructions>\n${config.systemPrompt}\n</agent_instructions>`
       : "";
 
-    return envBlock + "\n\n<inherited_system_prompt>\n" + identity + "\n</inherited_system_prompt>\n\n" + bridge + customSection + extrasSuffix;
+    return (
+      envBlock +
+      "\n\n<inherited_system_prompt>\n" +
+      identity +
+      "\n</inherited_system_prompt>\n\n" +
+      bridge +
+      customSection +
+      extrasSuffix
+    );
   }
 
   // "replace" mode — env header + the config's full system prompt
@@ -75,7 +86,7 @@ You have been invoked to handle a specific task autonomously.
 
 ${envBlock}`;
 
-  return replaceHeader + "\n\n" + config.systemPrompt + extrasSuffix;
+  return `${replaceHeader}\n\n${config.systemPrompt}${extrasSuffix}`;
 }
 
 /** Fallback base prompt when parent system prompt is unavailable in append mode. */

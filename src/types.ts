@@ -5,13 +5,17 @@
 import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 
-export type { ThinkingLevel };
+export type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 
 /** Agent type: any string name (built-in defaults or user-defined). */
 export type SubagentType = string;
 
 /** Names of the three embedded default agents. */
-export const DEFAULT_AGENT_NAMES = ["general-purpose", "Explore", "Plan"] as const;
+export const DEFAULT_AGENT_NAMES = [
+  "general-purpose",
+  "Explore",
+  "Plan",
+] as const;
 
 /** Memory scope for persistent agent memory. */
 export type MemoryScope = "user" | "project" | "local";
@@ -54,13 +58,20 @@ export interface AgentConfig {
   source?: "default" | "project" | "global";
 }
 
-export type JoinMode = 'async' | 'group' | 'smart';
+export type JoinMode = "async" | "group" | "smart";
 
 export interface AgentRecord {
   id: string;
   type: SubagentType;
   description: string;
-  status: "queued" | "running" | "completed" | "steered" | "aborted" | "stopped" | "error";
+  status:
+    | "queued"
+    | "running"
+    | "completed"
+    | "steered"
+    | "aborted"
+    | "stopped"
+    | "error";
   result?: string;
   error?: string;
   /** Short resolved model name for live status display. */

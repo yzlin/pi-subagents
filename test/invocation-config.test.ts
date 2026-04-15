@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { resolveAgentInvocationConfig, resolveJoinMode } from "../src/invocation-config.js";
+
+import {
+  resolveAgentInvocationConfig,
+  resolveJoinMode,
+} from "../src/invocation-config.js";
 import type { AgentConfig } from "../src/types.js";
 
 function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
@@ -38,7 +42,7 @@ describe("resolveAgentInvocationConfig", () => {
         run_in_background: true,
         isolated: true,
         isolation: "worktree",
-      },
+      }
     );
 
     expect(resolved.modelInput).toBe("provider/config-model");
@@ -83,7 +87,7 @@ describe("resolveAgentInvocationConfig", () => {
         inherit_context: true,
         run_in_background: true,
         isolated: true,
-      },
+      }
     );
 
     expect(resolved.inheritContext).toBe(true);
@@ -98,7 +102,7 @@ describe("resolveAgentInvocationConfig", () => {
         runInBackground: undefined,
         isolated: undefined,
       }),
-      {},
+      {}
     );
 
     expect(resolved.inheritContext).toBe(false);

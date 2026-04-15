@@ -6,35 +6,63 @@
  */
 
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
-import { type Component, matchesKey, type TUI, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@mariozechner/pi-tui";
+import {
+  type Component,
+  matchesKey,
+  type TUI,
+  truncateToWidth,
+  visibleWidth,
+  wrapTextWithAnsi,
+} from "@mariozechner/pi-tui";
+
 import { extractText } from "../context.js";
 import type { AgentRecord } from "../types.js";
 import type { Theme } from "./agent-widget.js";
-import { type AgentActivity, describeActivity, formatDuration, formatTokens, getDisplayName, getPromptModeLabel } from "./agent-widget.js";
+import {
+  type AgentActivity,
+  describeActivity,
+  formatDuration,
+  formatTokens,
+  getDisplayName,
+  getPromptModeLabel,
+} from "./agent-widget.js";
 
 /** Lines consumed by chrome: top border + header + header sep + footer sep + footer + bottom border. */
 const CHROME_LINES = 6;
 const MIN_VIEWPORT = 3;
 const TAB_STOP = 8;
-const GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+const ANSI_TERMINATOR_RE = /[A-Za-z]/;
+const GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, {
+  granularity: "grapheme",
+});
 
 function readEscapeSequence(text: string, start: number): string | undefined {
-  if (text[start] !== "\x1b") return undefined;
+  if (text[start] !== "\x1b") {
+    return undefined;
+  }
 
   const next = text[start + 1];
-  if (!next) return undefined;
+  if (!next) {
+    return undefined;
+  }
 
   if (next === "[") {
     let end = start + 2;
-    while (end < text.length && !/[A-Za-z]/.test(text[end])) end++;
+    while (end < text.length && !ANSI_TERMINATOR_RE.test(text[end])) {
+      end++;
+    }
     return end < text.length ? text.slice(start, end + 1) : undefined;
   }
 
   if (next === "]" || next === "_") {
     let end = start + 2;
     while (end < text.length) {
-      if (text[end] === "\x07") return text.slice(start, end + 1);
-      if (text[end] === "\x1b" && text[end + 1] === "\\") return text.slice(start, end + 2);
+      if (text[end] === "\x07") {
+        return text.slice(start, end + 1);
+      }
+      if (text[end] === "\x1b" && text[end + 1] === "\\") {
+        return text.slice(start, end + 2);
+      }
       end++;
     }
     return undefined;
@@ -44,12 +72,14 @@ function readEscapeSequence(text: string, start: number): string | undefined {
 }
 
 function expandTabsForDisplay(line: string): string {
-  if (!line.includes("\t")) return line;
+  if (!line.includes("\t")) {
+    return line;
+  }
 
   let result = "";
   let column = 0;
 
-  for (let i = 0; i < line.length;) {
+  for (let i = 0; i < line.length; ) {
     const escapeSequence = readEscapeSequence(line, i);
     if (escapeSequence) {
       result += escapeSequence;
@@ -67,8 +97,12 @@ function expandTabsForDisplay(line: string): string {
 
     let end = i;
     while (end < line.length) {
-      if (line[end] === "\t") break;
-      if (readEscapeSequence(line, end)) break;
+      if (line[end] === "\t") {
+        break;
+      }
+      if (readEscapeSequence(line, end)) {
+        break;
+      }
       end++;
     }
 
@@ -84,8 +118,36 @@ function expandTabsForDisplay(line: string): string {
 }
 
 function normalizeDisplayText(text: string): string {
-  if (!text.includes("\t")) return text;
+  if (!text.includes("\t")) {
+    return text;
+  }
   return text.split("\n").map(expandTabsForDisplay).join("\n");
+}
+
+interface ToolCallContentBlock {
+  type: "toolCall";
+  name?: string;
+  toolName?: string;
+}
+
+interface BashExecutionMessage {
+  role: "bashExecution";
+  command: string;
+  output?: string;
+}
+
+function getToolCallName(content: ToolCallContentBlock): string {
+  return content.name ?? content.toolName ?? "unknown";
+}
+
+function isBashExecutionMessage(
+  message: AgentSession["messages"][number]
+): message is AgentSession["messages"][number] & BashExecutionMessage {
+  return (
+    message.role === "bashExecution" &&
+    "command" in message &&
+    typeof message.command === "string"
+  );
 }
 
 function matchesPagingAlias(data: string, direction: "up" | "down"): boolean {
@@ -102,17 +164,31 @@ export class ConversationViewer implements Component {
   private unsubscribe: (() => void) | undefined;
   private lastInnerW = 0;
   private closed = false;
+  private readonly tui: TUI;
+  private readonly session: AgentSession;
+  private readonly record: AgentRecord;
+  private readonly activity: AgentActivity | undefined;
+  private readonly theme: Theme;
+  private readonly done: (result: undefined) => void;
 
   constructor(
-    private tui: TUI,
-    private session: AgentSession,
-    private record: AgentRecord,
-    private activity: AgentActivity | undefined,
-    private theme: Theme,
-    private done: (result: undefined) => void,
+    tui: TUI,
+    session: AgentSession,
+    record: AgentRecord,
+    activity: AgentActivity | undefined,
+    theme: Theme,
+    done: (result: undefined) => void
   ) {
+    this.tui = tui;
+    this.session = session;
+    this.record = record;
+    this.activity = activity;
+    this.theme = theme;
+    this.done = done;
     this.unsubscribe = session.subscribe(() => {
-      if (this.closed) return;
+      if (this.closed) {
+        return;
+      }
       this.tui.requestRender();
     });
   }
@@ -138,7 +214,10 @@ export class ConversationViewer implements Component {
       this.scrollOffset = Math.max(0, this.scrollOffset - viewportHeight);
       this.autoScroll = false;
     } else if (matchesPagingAlias(data, "down")) {
-      this.scrollOffset = Math.min(maxScroll, this.scrollOffset + viewportHeight);
+      this.scrollOffset = Math.min(
+        maxScroll,
+        this.scrollOffset + viewportHeight
+      );
       this.autoScroll = this.scrollOffset >= maxScroll;
     } else if (matchesKey(data, "home")) {
       this.scrollOffset = 0;
@@ -150,7 +229,9 @@ export class ConversationViewer implements Component {
   }
 
   render(width: number): string[] {
-    if (width < 6) return []; // too narrow for any meaningful rendering
+    if (width < 6) {
+      return []; // too narrow for any meaningful rendering
+    }
     const th = this.theme;
     const innerW = width - 4; // border + padding
     this.lastInnerW = innerW;
@@ -161,7 +242,11 @@ export class ConversationViewer implements Component {
       return s + " ".repeat(Math.max(0, len - vis));
     };
     const row = (content: string) =>
-      th.fg("border", "│") + " " + truncateToWidth(pad(content, innerW), innerW) + " " + th.fg("border", "│");
+      th.fg("border", "│") +
+      " " +
+      truncateToWidth(pad(content, innerW), innerW) +
+      " " +
+      th.fg("border", "│");
     const hrTop = th.fg("border", `╭${"─".repeat(width - 2)}╮`);
     const hrBot = th.fg("border", `╰${"─".repeat(width - 2)}╯`);
     const hrMid = row(th.fg("dim", "─".repeat(innerW)));
@@ -171,28 +256,40 @@ export class ConversationViewer implements Component {
     const name = getDisplayName(this.record.type);
     const modeLabel = getPromptModeLabel(this.record.type);
     const modeTag = modeLabel ? ` ${th.fg("dim", `(${modeLabel})`)}` : "";
-    const statusIcon = this.record.status === "running"
-      ? th.fg("accent", "●")
-      : this.record.status === "completed"
-        ? th.fg("success", "✓")
-        : this.record.status === "error"
-          ? th.fg("error", "✗")
-          : th.fg("dim", "○");
-    const duration = formatDuration(this.record.startedAt, this.record.completedAt);
+    let statusIcon = th.fg("dim", "○");
+    if (this.record.status === "running") {
+      statusIcon = th.fg("accent", "●");
+    } else if (this.record.status === "completed") {
+      statusIcon = th.fg("success", "✓");
+    } else if (this.record.status === "error") {
+      statusIcon = th.fg("error", "✗");
+    }
+    const duration = formatDuration(
+      this.record.startedAt,
+      this.record.completedAt
+    );
 
     const headerParts: string[] = [duration];
     const toolUses = this.activity?.toolUses ?? this.record.toolUses;
-    if (toolUses > 0) headerParts.unshift(`${toolUses} tool${toolUses === 1 ? "" : "s"}`);
+    if (toolUses > 0) {
+      headerParts.unshift(`${toolUses} tool${toolUses === 1 ? "" : "s"}`);
+    }
     if (this.activity?.session) {
       try {
         const tokens = this.activity.session.getSessionStats().tokens.total;
-        if (tokens > 0) headerParts.push(formatTokens(tokens));
-      } catch { /* */ }
+        if (tokens > 0) {
+          headerParts.push(formatTokens(tokens));
+        }
+      } catch {
+        /* */
+      }
     }
 
-    lines.push(row(
-      `${statusIcon} ${th.bold(name)}${modeTag}  ${th.fg("muted", this.record.description)} ${th.fg("dim", "·")} ${th.fg("dim", headerParts.join(" · "))}`,
-    ));
+    lines.push(
+      row(
+        `${statusIcon} ${th.bold(name)}${modeTag}  ${th.fg("muted", this.record.description)} ${th.fg("dim", "·")} ${th.fg("dim", headerParts.join(" · "))}`
+      )
+    );
     lines.push(hrMid);
 
     // Content area — rebuild every render (live data, no cache needed)
@@ -205,7 +302,10 @@ export class ConversationViewer implements Component {
     }
 
     const visibleStart = Math.min(this.scrollOffset, maxScroll);
-    const visible = contentLines.slice(visibleStart, visibleStart + viewportHeight);
+    const visible = contentLines.slice(
+      visibleStart,
+      visibleStart + viewportHeight
+    );
 
     for (let i = 0; i < viewportHeight; i++) {
       lines.push(row(visible[i] ?? ""));
@@ -213,19 +313,31 @@ export class ConversationViewer implements Component {
 
     // Footer
     lines.push(hrMid);
-    const scrollPct = contentLines.length <= viewportHeight
-      ? "100%"
-      : `${Math.round(((visibleStart + viewportHeight) / contentLines.length) * 100)}%`;
-    const footerLeft = th.fg("dim", `${contentLines.length} lines · ${scrollPct}`);
-    const footerRight = th.fg("dim", "↑↓/jk scroll · PgUp/PgDn/Ctrl+F/B · Esc close");
-    const footerGap = Math.max(1, innerW - visibleWidth(footerLeft) - visibleWidth(footerRight));
+    const scrollPct =
+      contentLines.length <= viewportHeight
+        ? "100%"
+        : `${Math.round(((visibleStart + viewportHeight) / contentLines.length) * 100)}%`;
+    const footerLeft = th.fg(
+      "dim",
+      `${contentLines.length} lines · ${scrollPct}`
+    );
+    const footerRight = th.fg(
+      "dim",
+      "↑↓/jk scroll · PgUp/PgDn/Ctrl+F/B · Esc close"
+    );
+    const footerGap = Math.max(
+      1,
+      innerW - visibleWidth(footerLeft) - visibleWidth(footerRight)
+    );
     lines.push(row(footerLeft + " ".repeat(footerGap) + footerRight));
     lines.push(hrBot);
 
     return lines;
   }
 
-  invalidate(): void { /* no cached state to clear */ }
+  invalidate(): void {
+    /* no cached state to clear */
+  }
 
   dispose(): void {
     this.closed = true;
@@ -242,7 +354,9 @@ export class ConversationViewer implements Component {
   }
 
   private buildContentLines(width: number): string[] {
-    if (width <= 0) return [];
+    if (width <= 0) {
+      return [];
+    }
 
     const th = this.theme;
     const messages = this.session.messages;
@@ -256,52 +370,87 @@ export class ConversationViewer implements Component {
     let needsSeparator = false;
     for (const msg of messages) {
       if (msg.role === "user") {
-        const text = typeof msg.content === "string"
-          ? msg.content
-          : extractText(msg.content);
-        if (!text.trim()) continue;
-        if (needsSeparator) lines.push(th.fg("dim", "───"));
+        const text =
+          typeof msg.content === "string"
+            ? msg.content
+            : extractText(msg.content);
+        if (!text.trim()) {
+          continue;
+        }
+        if (needsSeparator) {
+          lines.push(th.fg("dim", "───"));
+        }
         lines.push(th.fg("accent", "[User]"));
-        for (const line of wrapTextWithAnsi(normalizeDisplayText(text.trim()), width)) {
+        for (const line of wrapTextWithAnsi(
+          normalizeDisplayText(text.trim()),
+          width
+        )) {
           lines.push(line);
         }
       } else if (msg.role === "assistant") {
         const textParts: string[] = [];
         const toolCalls: string[] = [];
         for (const c of msg.content) {
-          if (c.type === "text" && c.text) textParts.push(c.text);
-          else if (c.type === "toolCall") {
-            toolCalls.push((c as any).name ?? (c as any).toolName ?? "unknown");
+          if (c.type === "text" && c.text) {
+            textParts.push(c.text);
+          } else if (c.type === "toolCall") {
+            toolCalls.push(getToolCallName(c));
           }
         }
-        if (needsSeparator) lines.push(th.fg("dim", "───"));
+        if (needsSeparator) {
+          lines.push(th.fg("dim", "───"));
+        }
         lines.push(th.bold("[Assistant]"));
         if (textParts.length > 0) {
-          for (const line of wrapTextWithAnsi(normalizeDisplayText(textParts.join("\n").trim()), width)) {
+          for (const line of wrapTextWithAnsi(
+            normalizeDisplayText(textParts.join("\n").trim()),
+            width
+          )) {
             lines.push(line);
           }
         }
         for (const name of toolCalls) {
-          lines.push(truncateToWidth(th.fg("muted", `  [Tool: ${name}]`), width));
+          lines.push(
+            truncateToWidth(th.fg("muted", `  [Tool: ${name}]`), width)
+          );
         }
       } else if (msg.role === "toolResult") {
         const text = extractText(msg.content);
-        const truncated = text.length > 500 ? text.slice(0, 500) + "... (truncated)" : text;
-        if (!truncated.trim()) continue;
-        if (needsSeparator) lines.push(th.fg("dim", "───"));
+        const truncated =
+          text.length > 500 ? `${text.slice(0, 500)}... (truncated)` : text;
+        if (!truncated.trim()) {
+          continue;
+        }
+        if (needsSeparator) {
+          lines.push(th.fg("dim", "───"));
+        }
         lines.push(th.fg("dim", "[Result]"));
-        for (const line of wrapTextWithAnsi(normalizeDisplayText(truncated.trim()), width)) {
+        for (const line of wrapTextWithAnsi(
+          normalizeDisplayText(truncated.trim()),
+          width
+        )) {
           lines.push(th.fg("dim", line));
         }
-      } else if ((msg as any).role === "bashExecution") {
-        const bash = msg as any;
-        if (needsSeparator) lines.push(th.fg("dim", "───"));
-        lines.push(truncateToWidth(th.fg("muted", `  $ ${normalizeDisplayText(bash.command)}`), width));
+      } else if (isBashExecutionMessage(msg)) {
+        const bash = msg;
+        if (needsSeparator) {
+          lines.push(th.fg("dim", "───"));
+        }
+        lines.push(
+          truncateToWidth(
+            th.fg("muted", `  $ ${normalizeDisplayText(bash.command)}`),
+            width
+          )
+        );
         if (bash.output?.trim()) {
-          const out = bash.output.length > 500
-            ? bash.output.slice(0, 500) + "... (truncated)"
-            : bash.output;
-          for (const line of wrapTextWithAnsi(normalizeDisplayText(out.trim()), width)) {
+          const out =
+            bash.output.length > 500
+              ? `${bash.output.slice(0, 500)}... (truncated)`
+              : bash.output;
+          for (const line of wrapTextWithAnsi(
+            normalizeDisplayText(out.trim()),
+            width
+          )) {
             lines.push(th.fg("dim", line));
           }
         }
@@ -313,11 +462,18 @@ export class ConversationViewer implements Component {
 
     // Streaming indicator for running agents
     if (this.record.status === "running" && this.activity) {
-      const act = describeActivity(this.activity.activeTools, this.activity.responseText);
+      const act = describeActivity(
+        this.activity.activeTools,
+        this.activity.responseText
+      );
       lines.push("");
-      lines.push(truncateToWidth(th.fg("accent", "▍ ") + th.fg("dim", act), width));
+      lines.push(
+        truncateToWidth(th.fg("accent", "▍ ") + th.fg("dim", act), width)
+      );
     }
 
-    return lines.map(line => truncateToWidth(expandTabsForDisplay(line), width));
+    return lines.map((line) =>
+      truncateToWidth(expandTabsForDisplay(line), width)
+    );
   }
 }

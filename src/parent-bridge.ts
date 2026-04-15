@@ -52,30 +52,39 @@ function resolveSessionId(sessionId?: string): string {
 }
 
 export class ParentBridge {
-  private queues = new Map<string, QueuedParentMessage[]>();
-  private pendingAsks = new Map<string, PendingAsk>();
-  private pendingAskIdsByAgent = new Map<string, Set<string>>();
-  private messageIndex = new Map<string, QueuedParentMessage>();
-  private queueListeners = new Set<() => void>();
+  private readonly queues = new Map<string, QueuedParentMessage[]>();
+  private readonly pendingAsks = new Map<string, PendingAsk>();
+  private readonly pendingAskIdsByAgent = new Map<string, Set<string>>();
+  private readonly messageIndex = new Map<string, QueuedParentMessage>();
+  private readonly queueListeners = new Set<() => void>();
+  private readonly defaultAskTimeoutMs: number;
 
-  constructor(private readonly defaultAskTimeoutMs = DEFAULT_ASK_PARENT_TIMEOUT_MS) {}
+  constructor(defaultAskTimeoutMs = DEFAULT_ASK_PARENT_TIMEOUT_MS) {
+    this.defaultAskTimeoutMs = defaultAskTimeoutMs;
+  }
 
   onQueue(listener: () => void): () => void {
     this.queueListeners.add(listener);
     return () => this.queueListeners.delete(listener);
   }
 
-  messageParent(agentId: string, message: string, options: QueueOptions = {}): QueuedParentMessage {
+  messageParent(
+    agentId: string,
+    message: string,
+    options: QueueOptions = {}
+  ): QueuedParentMessage {
     return this.enqueue(agentId, "message", message, options);
   }
 
   askParent(
     agentId: string,
     message: string,
-    options: AskParentOptions = {},
+    options: AskParentOptions = {}
   ): Promise<ParentReply> {
     if (options.signal?.aborted) {
-      return Promise.reject(createAbortError(`ask_parent aborted for agent ${agentId}`));
+      return Promise.reject(
+        createAbortError(`ask_parent aborted for agent ${agentId}`)
+      );
     }
 
     const sessionId = resolveSessionId(options.sessionId);
@@ -85,16 +94,23 @@ export class ParentBridge {
       requestId,
       emit: false,
     });
-    const timeoutMs = Math.max(1, options.timeoutMs ?? this.defaultAskTimeoutMs);
+    const timeoutMs = Math.max(
+      1,
+      options.timeoutMs ?? this.defaultAskTimeoutMs
+    );
 
     return new Promise<ParentReply>((resolve, reject) => {
       let settled = false;
       let timeout: ReturnType<typeof setTimeout> | undefined;
 
       const finish = (fn: () => void): boolean => {
-        if (settled) return false;
+        if (settled) {
+          return false;
+        }
         settled = true;
-        if (timeout) clearTimeout(timeout);
+        if (timeout) {
+          clearTimeout(timeout);
+        }
         options.signal?.removeEventListener("abort", onAbort);
         this.pendingAsks.delete(queued.requestId);
         this.removeQueuedMessage(queued.requestId);
@@ -105,7 +121,9 @@ export class ParentBridge {
       };
 
       const onAbort = () => {
-        finish(() => reject(createAbortError(`ask_parent aborted for agent ${agentId}`)));
+        finish(() =>
+          reject(createAbortError(`ask_parent aborted for agent ${agentId}`))
+        );
       };
 
       let askIds = this.pendingAskIdsByAgent.get(agentId);
@@ -128,7 +146,13 @@ export class ParentBridge {
 
       options.signal?.addEventListener("abort", onAbort, { once: true });
       timeout = setTimeout(() => {
-        finish(() => reject(new Error(`Timed out waiting for parent reply (${queued.requestId})`)));
+        finish(() =>
+          reject(
+            new Error(
+              `Timed out waiting for parent reply (${queued.requestId})`
+            )
+          )
+        );
       }, timeoutMs);
       this.emitQueueListeners();
     });
@@ -151,9 +175,15 @@ export class ParentBridge {
     const drained: QueuedParentMessage[] = [];
 
     for (const [agentId, queued] of this.queues) {
-      const matches = queued.filter((message) => message.sessionId === resolvedSessionId);
-      const remaining = queued.filter((message) => message.sessionId !== resolvedSessionId);
-      if (matches.length > 0) drained.push(...matches);
+      const matches = queued.filter(
+        (message) => message.sessionId === resolvedSessionId
+      );
+      const remaining = queued.filter(
+        (message) => message.sessionId !== resolvedSessionId
+      );
+      if (matches.length > 0) {
+        drained.push(...matches);
+      }
       this.setQueuedMessages(agentId, remaining);
     }
 
@@ -161,22 +191,40 @@ export class ParentBridge {
   }
 
   hasQueuedMessages(sessionId?: string): boolean {
-    if (!sessionId) return [...this.queues.values()].some((queued) => queued.length > 0);
+    if (!sessionId) {
+      return [...this.queues.values()].some((queued) => queued.length > 0);
+    }
     const resolvedSessionId = resolveSessionId(sessionId);
-    return [...this.queues.values()].some((queued) => queued.some((message) => message.sessionId === resolvedSessionId));
+    return [...this.queues.values()].some((queued) =>
+      queued.some((message) => message.sessionId === resolvedSessionId)
+    );
   }
 
   getPendingAskCount(agentId?: string): number {
-    if (agentId) return this.pendingAskIdsByAgent.get(agentId)?.size ?? 0;
+    if (agentId) {
+      return this.pendingAskIdsByAgent.get(agentId)?.size ?? 0;
+    }
     let count = 0;
-    for (const ids of this.pendingAskIdsByAgent.values()) count += ids.size;
+    for (const ids of this.pendingAskIdsByAgent.values()) {
+      count += ids.size;
+    }
     return count;
   }
 
-  getMessage(requestId: string, options: QueueOptions = {}): QueuedParentMessage | undefined {
+  getMessage(
+    requestId: string,
+    options: QueueOptions = {}
+  ): QueuedParentMessage | undefined {
     const message = this.messageIndex.get(requestId);
-    if (!message) return undefined;
-    if (options.sessionId && message.sessionId !== resolveSessionId(options.sessionId)) return undefined;
+    if (!message) {
+      return undefined;
+    }
+    if (
+      options.sessionId &&
+      message.sessionId !== resolveSessionId(options.sessionId)
+    ) {
+      return undefined;
+    }
     return message;
   }
 
@@ -184,29 +232,49 @@ export class ParentBridge {
     const resolvedSessionId = resolveSessionId(sessionId);
     let count = 0;
     for (const pending of this.pendingAsks.values()) {
-      if (pending.sessionId === resolvedSessionId) count++;
+      if (pending.sessionId === resolvedSessionId) {
+        count++;
+      }
     }
     return count;
   }
 
-  replyToAsk(requestId: string, text: string, options: ReplyOptions = {}): boolean {
+  replyToAsk(
+    requestId: string,
+    text: string,
+    options: ReplyOptions = {}
+  ): boolean {
     const pending = this.pendingAsks.get(requestId);
-    if (!pending) return false;
-    if (options.sessionId && pending.sessionId !== resolveSessionId(options.sessionId)) return false;
+    if (!pending) {
+      return false;
+    }
+    if (
+      options.sessionId &&
+      pending.sessionId !== resolveSessionId(options.sessionId)
+    ) {
+      return false;
+    }
     pending.resolve({ requestId, text, repliedAt: Date.now() });
     return true;
   }
 
   rejectAsk(requestId: string, error: string | Error): boolean {
     const pending = this.pendingAsks.get(requestId);
-    if (!pending) return false;
+    if (!pending) {
+      return false;
+    }
     pending.reject(typeof error === "string" ? new Error(error) : error);
     return true;
   }
 
-  disposeAgent(agentId: string, reason = `Parent bridge disposed for agent ${agentId}`): void {
+  disposeAgent(
+    agentId: string,
+    reason = `Parent bridge disposed for agent ${agentId}`
+  ): void {
     const queued = this.queues.get(agentId) ?? [];
-    const remainingMessages = queued.filter((message) => message.kind === "message");
+    const remainingMessages = queued.filter(
+      (message) => message.kind === "message"
+    );
     this.setQueuedMessages(agentId, remainingMessages);
 
     const askIds = this.pendingAskIdsByAgent.get(agentId);
@@ -220,12 +288,19 @@ export class ParentBridge {
     this.pendingAskIdsByAgent.delete(agentId);
   }
 
-  disposeSession(sessionId: string, reason = `Parent bridge disposed for session ${sessionId}`): void {
+  disposeSession(
+    sessionId: string,
+    reason = `Parent bridge disposed for session ${sessionId}`
+  ): void {
     const resolvedSessionId = resolveSessionId(sessionId);
 
     for (const [agentId, queued] of this.queues) {
-      const removed = queued.filter((message) => message.sessionId === resolvedSessionId);
-      const remaining = queued.filter((message) => message.sessionId !== resolvedSessionId);
+      const removed = queued.filter(
+        (message) => message.sessionId === resolvedSessionId
+      );
+      const remaining = queued.filter(
+        (message) => message.sessionId !== resolvedSessionId
+      );
       for (const message of removed) {
         this.messageIndex.delete(message.requestId);
       }
@@ -233,7 +308,9 @@ export class ParentBridge {
     }
 
     for (const [requestId, pending] of [...this.pendingAsks]) {
-      if (pending.sessionId !== resolvedSessionId) continue;
+      if (pending.sessionId !== resolvedSessionId) {
+        continue;
+      }
       pending.reject(createAbortError(reason));
       this.removeQueuedMessage(requestId);
     }
@@ -260,7 +337,7 @@ export class ParentBridge {
     agentId: string,
     kind: QueuedParentMessage["kind"],
     message: string,
-    options: EnqueueOptions = {},
+    options: EnqueueOptions = {}
   ): QueuedParentMessage {
     const queued: QueuedParentMessage = {
       agentId,
@@ -274,14 +351,20 @@ export class ParentBridge {
     existing.push(queued);
     this.queues.set(agentId, existing);
     this.messageIndex.set(queued.requestId, queued);
-    if (options.emit !== false) this.emitQueueListeners();
+    if (options.emit !== false) {
+      this.emitQueueListeners();
+    }
     return queued;
   }
 
   private removeQueuedMessage(requestId: string): void {
     for (const [agentId, queued] of this.queues) {
-      const remaining = queued.filter((message) => message.requestId !== requestId);
-      if (remaining.length === queued.length) continue;
+      const remaining = queued.filter(
+        (message) => message.requestId !== requestId
+      );
+      if (remaining.length === queued.length) {
+        continue;
+      }
       this.setQueuedMessages(agentId, remaining);
       return;
     }
@@ -289,14 +372,19 @@ export class ParentBridge {
 
   private removePendingAskId(agentId: string, requestId: string): void {
     const askIds = this.pendingAskIdsByAgent.get(agentId);
-    if (!askIds) return;
+    if (!askIds) {
+      return;
+    }
     askIds.delete(requestId);
     if (askIds.size === 0) {
       this.pendingAskIdsByAgent.delete(agentId);
     }
   }
 
-  private setQueuedMessages(agentId: string, queued: QueuedParentMessage[]): void {
+  private setQueuedMessages(
+    agentId: string,
+    queued: QueuedParentMessage[]
+  ): void {
     if (queued.length > 0) {
       this.queues.set(agentId, queued);
       return;
@@ -305,7 +393,9 @@ export class ParentBridge {
   }
 
   private emitQueueListeners(): void {
-    for (const listener of this.queueListeners) listener();
+    for (const listener of this.queueListeners) {
+      listener();
+    }
   }
 }
 

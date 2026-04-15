@@ -2,6 +2,10 @@
  * Model resolution: exact match ("provider/modelId") with fuzzy fallback.
  */
 
+import type { Api, Model } from "@mariozechner/pi-ai";
+
+const QUERY_SPLIT_RE = /[\s\-/]+/;
+
 export interface ModelEntry {
   id: string;
   name: string;
@@ -9,9 +13,9 @@ export interface ModelEntry {
 }
 
 export interface ModelRegistry {
-  find(provider: string, modelId: string): any;
-  getAll(): any[];
-  getAvailable?(): any[];
+  find(provider: string, modelId: string): Model<Api> | undefined;
+  getAll(): ModelEntry[];
+  getAvailable?(): ModelEntry[];
 }
 
 /**
@@ -21,11 +25,13 @@ export interface ModelRegistry {
  */
 export function resolveModel(
   input: string,
-  registry: ModelRegistry,
-): any | string {
+  registry: ModelRegistry
+): Model<Api> | string {
   // Available models (those with auth configured)
   const all = (registry.getAvailable?.() ?? registry.getAll()) as ModelEntry[];
-  const availableSet = new Set(all.map(m => `${m.provider}/${m.id}`.toLowerCase()));
+  const availableSet = new Set(
+    all.map((m) => `${m.provider}/${m.id}`.toLowerCase())
+  );
 
   // 1. Exact match: "provider/modelId" — only if available (has auth)
   const slashIdx = input.indexOf("/");
@@ -34,7 +40,9 @@ export function resolveModel(
     const modelId = input.slice(slashIdx + 1);
     if (availableSet.has(input.toLowerCase())) {
       const found = registry.find(provider, modelId);
-      if (found) return found;
+      if (found) {
+        return found;
+      }
     }
   }
 
@@ -57,7 +65,16 @@ export function resolveModel(
       score = 60 + (query.length / id.length) * 30; // substring, prefer tighter matches
     } else if (name.includes(query)) {
       score = 40 + (query.length / name.length) * 20;
-    } else if (query.split(/[\s\-/]+/).every(part => id.includes(part) || name.includes(part) || m.provider.toLowerCase().includes(part))) {
+    } else if (
+      query
+        .split(QUERY_SPLIT_RE)
+        .every(
+          (part) =>
+            id.includes(part) ||
+            name.includes(part) ||
+            m.provider.toLowerCase().includes(part)
+        )
+    ) {
       score = 20; // all parts present somewhere
     }
 
@@ -69,12 +86,14 @@ export function resolveModel(
 
   if (bestMatch && bestScore >= 20) {
     const found = registry.find(bestMatch.provider, bestMatch.id);
-    if (found) return found;
+    if (found) {
+      return found;
+    }
   }
 
   // 3. No match — list available models
   const modelList = all
-    .map(m => `  ${m.provider}/${m.id}`)
+    .map((m) => `  ${m.provider}/${m.id}`)
     .sort()
     .join("\n");
   return `Model not found: "${input}".\n\nAvailable models:\n${modelList}`;
