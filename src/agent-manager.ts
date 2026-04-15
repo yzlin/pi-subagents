@@ -10,12 +10,17 @@ import { randomUUID } from "node:crypto";
 import type { Model } from "@mariozechner/pi-ai";
 import type { AgentSession, ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
+import { parentBridge } from "./parent-bridge.js";
 import type { AgentRecord, IsolationMode, SubagentType, ThinkingLevel } from "./types.js";
 import { cleanupWorktree, createWorktree, pruneWorktrees, } from "./worktree.js";
 
 function getModelName(model?: Model<any>): string | undefined {
   const label = model?.name ?? model?.id;
   return label ? label.replace(/^Claude\s+/i, "").toLowerCase() : undefined;
+}
+
+function getParentSessionId(ctx: ExtensionContext): string | undefined {
+  return ctx.sessionManager?.getSessionId?.();
 }
 
 export type OnAgentComplete = (record: AgentRecord) => void;
@@ -146,6 +151,9 @@ export class AgentManager {
 
     const promise = runAgent(ctx, type, effectivePrompt, {
       pi,
+      agentId: id,
+      parentSessionId: getParentSessionId(ctx),
+      allowAskParent: Boolean(options.isBackground),
       model: options.model,
       maxTurns: options.maxTurns,
       isolated: options.isolated,
@@ -179,6 +187,7 @@ export class AgentManager {
         record.result = responseText;
         record.session = session;
         record.completedAt ??= Date.now();
+        this.disposeBridgeState(id, `Agent ${id} ${record.status}.`);
 
         // Final flush of streaming output file
         if (record.outputCleanup) {
@@ -210,6 +219,7 @@ export class AgentManager {
         }
         record.error = err instanceof Error ? err.message : String(err);
         record.completedAt ??= Date.now();
+        this.disposeBridgeState(id, `Agent ${id} ${record.status}.`);
 
         // Final flush of streaming output file on error
         if (record.outputCleanup) {
@@ -290,10 +300,12 @@ export class AgentManager {
       record.status = "completed";
       record.result = responseText;
       record.completedAt = Date.now();
+      this.disposeBridgeState(id, `Agent ${id} completed.`);
     } catch (err) {
       record.status = "error";
       record.error = err instanceof Error ? err.message : String(err);
       record.completedAt = Date.now();
+      this.disposeBridgeState(id, `Agent ${id} error.`);
     }
 
     return record;
@@ -316,6 +328,7 @@ export class AgentManager {
     // Remove from queue if queued
     if (record.status === "queued") {
       this.queue = this.queue.filter(q => q.id !== id);
+      this.disposeBridgeState(id, `Agent ${id} removed from queue.`);
       record.status = "stopped";
       record.completedAt = Date.now();
       return true;
@@ -323,13 +336,19 @@ export class AgentManager {
 
     if (record.status !== "running") return false;
     record.abortController?.abort();
+    this.disposeBridgeState(id, `Agent ${id} stopped.`);
     record.status = "stopped";
     record.completedAt = Date.now();
     return true;
   }
 
+  private disposeBridgeState(id: string, reason: string): void {
+    parentBridge.disposeAgent(id, reason);
+  }
+
   /** Dispose a record's session and remove it from the map. */
   private removeRecord(id: string, record: AgentRecord): void {
+    this.disposeBridgeState(id, `Agent ${id} record removed.`);
     record.session?.dispose?.();
     record.session = undefined;
     this.agents.delete(id);
@@ -369,6 +388,7 @@ export class AgentManager {
     for (const queued of this.queue) {
       const record = this.agents.get(queued.id);
       if (record) {
+        this.disposeBridgeState(queued.id, `Agent ${queued.id} removed from queue.`);
         record.status = "stopped";
         record.completedAt = Date.now();
         count++;
@@ -376,9 +396,10 @@ export class AgentManager {
     }
     this.queue = [];
     // Abort running agents
-    for (const record of this.agents.values()) {
+    for (const [id, record] of this.agents) {
       if (record.status === "running") {
         record.abortController?.abort();
+        this.disposeBridgeState(id, `Agent ${id} stopped.`);
         record.status = "stopped";
         record.completedAt = Date.now();
         count++;
@@ -404,12 +425,10 @@ export class AgentManager {
 
   dispose() {
     clearInterval(this.cleanupInterval);
-    // Clear queue
-    this.queue = [];
-    for (const record of this.agents.values()) {
-      record.session?.dispose();
+    this.abortAll();
+    for (const [id, record] of this.agents) {
+      this.removeRecord(id, record);
     }
-    this.agents.clear();
     // Prune any orphaned git worktrees (crash recovery)
     try { pruneWorktrees(process.cwd()); } catch { /* ignore */ }
   }

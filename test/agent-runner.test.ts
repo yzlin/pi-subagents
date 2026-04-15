@@ -13,27 +13,31 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
   SettingsManager: { create: vi.fn(() => ({ kind: "settings-manager" })) },
 }));
 
+const DEFAULT_CONFIG = {
+  displayName: "Explore",
+  description: "Explore",
+  builtinToolNames: ["read"],
+  extensions: false,
+  skills: false,
+  promptMode: "replace",
+};
+
+const DEFAULT_AGENT_CONFIG = {
+  name: "Explore",
+  description: "Explore",
+  builtinToolNames: ["read"],
+  extensions: false,
+  skills: false,
+  systemPrompt: "You are Explore.",
+  promptMode: "replace",
+  inheritContext: false,
+  runInBackground: false,
+  isolated: false,
+};
+
 vi.mock("../src/agent-types.js", () => ({
-  getConfig: vi.fn(() => ({
-    displayName: "Explore",
-    description: "Explore",
-    builtinToolNames: ["read"],
-    extensions: false,
-    skills: false,
-    promptMode: "replace",
-  })),
-  getAgentConfig: vi.fn(() => ({
-    name: "Explore",
-    description: "Explore",
-    builtinToolNames: ["read"],
-    extensions: false,
-    skills: false,
-    systemPrompt: "You are Explore.",
-    promptMode: "replace",
-    inheritContext: false,
-    runInBackground: false,
-    isolated: false,
-  })),
+  getConfig: vi.fn(() => DEFAULT_CONFIG),
+  getAgentConfig: vi.fn(() => DEFAULT_AGENT_CONFIG),
   getMemoryTools: vi.fn(() => []),
   getReadOnlyMemoryTools: vi.fn(() => []),
   getToolsForType: vi.fn(() => [{ name: "read" }]),
@@ -56,7 +60,9 @@ vi.mock("../src/skill-loader.js", () => ({
   preloadSkills: vi.fn(() => []),
 }));
 
+import { getAgentConfig, getConfig } from "../src/agent-types.js";
 import { resumeAgent, runAgent } from "../src/agent-runner.js";
+import { parentBridge } from "../src/parent-bridge.js";
 
 function createSession(finalText: string) {
   const listeners: Array<(event: any) => void> = [];
@@ -93,6 +99,10 @@ const pi = {} as any;
 
 beforeEach(() => {
   createAgentSession.mockReset();
+  vi.mocked(getConfig).mockReturnValue(DEFAULT_CONFIG as any);
+  vi.mocked(getAgentConfig).mockReturnValue(DEFAULT_AGENT_CONFIG as any);
+  parentBridge.disposeAll("test cleanup");
+  parentBridge.drainAllMessages();
 });
 
 describe("agent-runner final output capture", () => {
@@ -119,6 +129,94 @@ describe("agent-runner final output capture", () => {
     const bindOrder = session.bindExtensions.mock.invocationCallOrder[0];
     const promptOrder = session.prompt.mock.invocationCallOrder[0];
     expect(bindOrder).toBeLessThan(promptOrder);
+  });
+
+  it("does not inherit parent-only bridge tools into child sessions", async () => {
+    const { session } = createSession("BOUND");
+    session.getActiveToolNames.mockReturnValue(["read", "reply_to_subagent", "get_subagent_message", "steer_subagent"]);
+    createAgentSession.mockResolvedValue({ session });
+    vi.mocked(getConfig).mockReturnValue({ ...DEFAULT_CONFIG, extensions: true } as any);
+    vi.mocked(getAgentConfig).mockReturnValue({ ...DEFAULT_AGENT_CONFIG, extensions: true } as any);
+
+    await runAgent(ctx, "Explore", "Say BOUND", { pi });
+
+    expect(session.setActiveToolsByName).toHaveBeenCalledWith(["read"]);
+  });
+
+  it("adds parent bridge tools when an agentId is provided", async () => {
+    const { session } = createSession("BRIDGED");
+    createAgentSession.mockResolvedValue({ session });
+
+    await runAgent(ctx, "Explore", "Say BRIDGED", { pi, agentId: "agent-123" });
+
+    const sessionOptions = createAgentSession.mock.calls[0][0] as { tools: Array<{ name: string }> };
+    expect(sessionOptions.tools.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining(["read", "message_parent", "ask_parent"]),
+    );
+  });
+
+  it("message_parent queues a one-way parent update", async () => {
+    const { session } = createSession("BRIDGED");
+    createAgentSession.mockResolvedValue({ session });
+
+    await runAgent(ctx, "Explore", "Send update", { pi, agentId: "agent-123" });
+
+    const sessionOptions = createAgentSession.mock.calls[0][0] as {
+      tools: Array<{ name: string; execute: (toolCallId: string, params: unknown) => Promise<any> }>;
+    };
+    const messageParentTool = sessionOptions.tools.find((tool) => tool.name === "message_parent");
+
+    expect(messageParentTool).toBeDefined();
+
+    const result = await messageParentTool!.execute("tool-call-1", { message: "Heads up" });
+    const queued = parentBridge.drainMessages("agent-123");
+
+    expect(result.content).toEqual([
+      { type: "text", text: `Queued message for parent (${result.details.requestId}).` },
+    ]);
+    expect(result.details.requestId).toEqual(expect.any(String));
+    expect(queued).toEqual([
+      expect.objectContaining({
+        agentId: "agent-123",
+        requestId: result.details.requestId,
+        kind: "message",
+        message: "Heads up",
+      }),
+    ]);
+  });
+
+  it("ask_parent queues a request and resolves with the parent reply", async () => {
+    const { session } = createSession("BRIDGED");
+    createAgentSession.mockResolvedValue({ session });
+
+    await runAgent(ctx, "Explore", "Need approval", { pi, agentId: "agent-123" });
+
+    const sessionOptions = createAgentSession.mock.calls[0][0] as {
+      tools: Array<{ name: string; execute: (toolCallId: string, params: unknown, signal?: AbortSignal) => Promise<any> }>;
+    };
+    const askParentTool = sessionOptions.tools.find((tool) => tool.name === "ask_parent");
+
+    expect(askParentTool).toBeDefined();
+
+    const resultPromise = askParentTool!.execute("tool-call-2", {
+      message: "Approve deploy?",
+      timeout_ms: 250,
+    });
+    const [queued] = parentBridge.drainMessages("agent-123");
+
+    expect(queued).toMatchObject({
+      agentId: "agent-123",
+      kind: "ask",
+      message: "Approve deploy?",
+    });
+    expect(parentBridge.getPendingAskCount("agent-123")).toBe(1);
+    expect(parentBridge.replyToAsk(queued.requestId, "Approved")).toBe(true);
+
+    await expect(resultPromise).resolves.toEqual({
+      content: [{ type: "text", text: "Approved" }],
+      details: { requestId: queued.requestId },
+    });
+    expect(parentBridge.getPendingAskCount("agent-123")).toBe(0);
   });
 
   it("resumeAgent also falls back to the final assistant message text", async () => {

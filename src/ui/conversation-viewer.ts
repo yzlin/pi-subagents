@@ -15,6 +15,78 @@ import { type AgentActivity, describeActivity, formatDuration, formatTokens, get
 /** Lines consumed by chrome: top border + header + header sep + footer sep + footer + bottom border. */
 const CHROME_LINES = 6;
 const MIN_VIEWPORT = 3;
+const TAB_STOP = 8;
+const GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+function readEscapeSequence(text: string, start: number): string | undefined {
+  if (text[start] !== "\x1b") return undefined;
+
+  const next = text[start + 1];
+  if (!next) return undefined;
+
+  if (next === "[") {
+    let end = start + 2;
+    while (end < text.length && !/[A-Za-z]/.test(text[end])) end++;
+    return end < text.length ? text.slice(start, end + 1) : undefined;
+  }
+
+  if (next === "]" || next === "_") {
+    let end = start + 2;
+    while (end < text.length) {
+      if (text[end] === "\x07") return text.slice(start, end + 1);
+      if (text[end] === "\x1b" && text[end + 1] === "\\") return text.slice(start, end + 2);
+      end++;
+    }
+    return undefined;
+  }
+
+  return undefined;
+}
+
+function expandTabsForDisplay(line: string): string {
+  if (!line.includes("\t")) return line;
+
+  let result = "";
+  let column = 0;
+
+  for (let i = 0; i < line.length;) {
+    const escape = readEscapeSequence(line, i);
+    if (escape) {
+      result += escape;
+      i += escape.length;
+      continue;
+    }
+
+    if (line[i] === "\t") {
+      const spaces = TAB_STOP - (column % TAB_STOP || 0);
+      result += " ".repeat(spaces);
+      column += spaces;
+      i++;
+      continue;
+    }
+
+    let end = i;
+    while (end < line.length) {
+      if (line[end] === "\t") break;
+      if (readEscapeSequence(line, end)) break;
+      end++;
+    }
+
+    const plainText = line.slice(i, end);
+    result += plainText;
+    for (const { segment } of GRAPHEME_SEGMENTER.segment(plainText)) {
+      column += visibleWidth(segment);
+    }
+    i = end;
+  }
+
+  return result;
+}
+
+function normalizeDisplayText(text: string): string {
+  if (!text.includes("\t")) return text;
+  return text.split("\n").map(expandTabsForDisplay).join("\n");
+}
 
 function matchesPagingAlias(data: string, direction: "up" | "down"): boolean {
   if (direction === "up") {
@@ -190,7 +262,7 @@ export class ConversationViewer implements Component {
         if (!text.trim()) continue;
         if (needsSeparator) lines.push(th.fg("dim", "───"));
         lines.push(th.fg("accent", "[User]"));
-        for (const line of wrapTextWithAnsi(text.trim(), width)) {
+        for (const line of wrapTextWithAnsi(normalizeDisplayText(text.trim()), width)) {
           lines.push(line);
         }
       } else if (msg.role === "assistant") {
@@ -205,7 +277,7 @@ export class ConversationViewer implements Component {
         if (needsSeparator) lines.push(th.fg("dim", "───"));
         lines.push(th.bold("[Assistant]"));
         if (textParts.length > 0) {
-          for (const line of wrapTextWithAnsi(textParts.join("\n").trim(), width)) {
+          for (const line of wrapTextWithAnsi(normalizeDisplayText(textParts.join("\n").trim()), width)) {
             lines.push(line);
           }
         }
@@ -218,18 +290,18 @@ export class ConversationViewer implements Component {
         if (!truncated.trim()) continue;
         if (needsSeparator) lines.push(th.fg("dim", "───"));
         lines.push(th.fg("dim", "[Result]"));
-        for (const line of wrapTextWithAnsi(truncated.trim(), width)) {
+        for (const line of wrapTextWithAnsi(normalizeDisplayText(truncated.trim()), width)) {
           lines.push(th.fg("dim", line));
         }
       } else if ((msg as any).role === "bashExecution") {
         const bash = msg as any;
         if (needsSeparator) lines.push(th.fg("dim", "───"));
-        lines.push(truncateToWidth(th.fg("muted", `  $ ${bash.command}`), width));
+        lines.push(truncateToWidth(th.fg("muted", `  $ ${normalizeDisplayText(bash.command)}`), width));
         if (bash.output?.trim()) {
           const out = bash.output.length > 500
             ? bash.output.slice(0, 500) + "... (truncated)"
             : bash.output;
-          for (const line of wrapTextWithAnsi(out.trim(), width)) {
+          for (const line of wrapTextWithAnsi(normalizeDisplayText(out.trim()), width)) {
             lines.push(th.fg("dim", line));
           }
         }
@@ -246,6 +318,6 @@ export class ConversationViewer implements Component {
       lines.push(truncateToWidth(th.fg("accent", "▍ ") + th.fg("dim", act), width));
     }
 
-    return lines.map(l => truncateToWidth(l, width));
+    return lines.map(line => truncateToWidth(expandTabsForDisplay(line), width));
   }
 }

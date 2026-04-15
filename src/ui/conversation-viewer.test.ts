@@ -223,6 +223,26 @@ describe("ConversationViewer", () => {
       }
     });
 
+    it("no line exceeds width with tabbed ANSI bash output", () => {
+      const tabbedLine = "\x1b]8;;\x07\x1b[38;2;84;92;126m1\timport { randomUUID } from \"node:crypto\";\x1b[39m";
+      const emojiTabbedLine = "\x1b[32m👩‍💻\x1b[0m\tconst value = 1;";
+      const messages = [
+        {
+          role: "bashExecution", command: "nl src/parent-bridge.ts",
+          output: `${tabbedLine}\n${emojiTabbedLine}\n${tabbedLine}`,
+          exitCode: 0, cancelled: false, truncated: false, timestamp: Date.now(),
+        },
+      ];
+      for (const w of [80, 108, 120]) {
+        const viewer = new ConversationViewer(
+          mockTui(30, w), mockSession(messages), mockRecord(), undefined, ansiTheme(), vi.fn(),
+        );
+        const lines = viewer.render(w);
+        assertAllLinesFit(lines, w);
+        expect(lines.join("\n")).not.toContain("\t");
+      }
+    });
+
     it("no line exceeds width with running activity indicator", () => {
       const activity = {
         activeTools: new Map([["read", "file.ts"], ["grep", "pattern"]]),

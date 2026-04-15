@@ -13,16 +13,18 @@ import {
   SessionManager,
   SettingsManager,
 } from "@mariozechner/pi-coding-agent";
+import { Type } from "@sinclair/typebox";
 import { getAgentConfig, getConfig, getMemoryTools, getReadOnlyMemoryTools, getToolsForType } from "./agent-types.js";
 import { buildParentContext, extractText } from "./context.js";
 import { detectEnv } from "./env.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "./memory.js";
+import { DEFAULT_PARENT_SESSION_ID, parentBridge } from "./parent-bridge.js";
 import { buildAgentPrompt, type PromptExtras } from "./prompts.js";
 import { preloadSkills } from "./skill-loader.js";
 import type { SubagentType, ThinkingLevel } from "./types.js";
 
 /** Names of tools registered by this extension that subagents must NOT inherit. */
-const EXCLUDED_TOOL_NAMES = ["Agent", "get_subagent_result", "steer_subagent"];
+const EXCLUDED_TOOL_NAMES = ["Agent", "get_subagent_result", "steer_subagent", "reply_to_subagent", "get_subagent_message"];
 
 /** Default max turns. undefined = unlimited (no turn limit). */
 let defaultMaxTurns: number | undefined;
@@ -86,6 +88,12 @@ export interface ToolActivity {
 export interface RunOptions {
   /** ExtensionAPI instance — used for pi.exec() instead of execSync. */
   pi: ExtensionAPI;
+  /** Stable runtime ID for parent bridge routing. */
+  agentId?: string;
+  /** Parent session affinity for bridge delivery. */
+  parentSessionId?: string;
+  /** Whether the subagent may block on ask_parent. */
+  allowAskParent?: boolean;
   model?: Model<any>;
   maxTurns?: number;
   signal?: AbortSignal;
@@ -151,6 +159,64 @@ function forwardAbortSignal(session: AgentSession, signal?: AbortSignal): () => 
   return () => signal.removeEventListener("abort", onAbort);
 }
 
+function createParentBridgeTools(
+  agentId: string,
+  parentSessionId = DEFAULT_PARENT_SESSION_ID,
+  allowAskParent = true,
+) {
+  const tools = [
+    {
+      name: "message_parent",
+      label: "Message Parent",
+      description: "Queue a one-way message for the parent agent.",
+      parameters: Type.Object({
+        message: Type.String({
+          description: "The message to send to the parent agent.",
+        }),
+      }),
+      async execute(_toolCallId: string, params: unknown) {
+        const { message } = params as { message: string };
+        const queued = parentBridge.messageParent(agentId, message, { sessionId: parentSessionId });
+        return {
+          content: [{ type: "text" as const, text: `Queued message for parent (${queued.requestId}).` }],
+          details: { requestId: queued.requestId },
+        };
+      },
+    },
+  ];
+
+  if (!allowAskParent) return tools;
+
+  tools.push({
+    name: "ask_parent",
+    label: "Ask Parent",
+    description: "Ask the parent agent a question and wait for a reply.",
+    parameters: Type.Object({
+      message: Type.String({
+        description: "The question or request for the parent agent.",
+      }),
+      timeout_ms: Type.Optional(Type.Number({
+        description: "Optional timeout in milliseconds while waiting for the parent reply.",
+        minimum: 1,
+      })),
+    }),
+    async execute(_toolCallId: string, params: unknown, signal?: AbortSignal) {
+      const { message, timeout_ms } = params as { message: string; timeout_ms?: number };
+      const reply = await parentBridge.askParent(agentId, message, {
+        sessionId: parentSessionId,
+        signal,
+        timeoutMs: timeout_ms,
+      });
+      return {
+        content: [{ type: "text" as const, text: reply.text }],
+        details: { requestId: reply.requestId },
+      };
+    },
+  });
+
+  return tools;
+}
+
 export async function runAgent(
   ctx: ExtensionContext,
   type: SubagentType,
@@ -184,6 +250,9 @@ export async function runAgent(
   }
 
   let tools = getToolsForType(type, effectiveCwd);
+  if (options.agentId) {
+    tools = [...tools, ...createParentBridgeTools(options.agentId, options.parentSessionId, options.allowAskParent)];
+  }
 
   // Persistent memory: detect write capability and branch accordingly.
   // Account for disallowedTools — a tool in the base set but on the denylist is not truly available.

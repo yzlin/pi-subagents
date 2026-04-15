@@ -13,12 +13,13 @@ https://github.com/user-attachments/assets/8685261b-9338-4fea-8dfe-1c590d5df543
 
 ## Features
 
-- **Claude Code look & feel** — same tool names, calling conventions, and UI patterns (`Agent`, `get_subagent_result`, `steer_subagent`) — feels native
+- **Claude Code look & feel** — same tool names, calling conventions, and UI patterns (`Agent`, `get_subagent_result`, `steer_subagent`, `reply_to_subagent`) — feels native
 - **Parallel background agents** — spawn multiple agents that run concurrently with automatic queuing (configurable concurrency limit, default 4) and smart group join (consolidated notifications)
 - **Live widget UI** — persistent above-editor widget with animated spinners, live tool activity, token counts, and colored status icons
 - **Conversation viewer** — select any agent in `/agents` to open a live-scrolling overlay of its full conversation (auto-follows new content, scroll up to pause)
 - **Custom agent types** — define agents in `.pi/agents/<name>.md` with YAML frontmatter: custom system prompts, model selection, thinking levels, tool restrictions
 - **Mid-run steering** — inject messages into running agents to redirect their work without restarting
+- **Parent↔subagent bridge** — subagents can queue one-way updates with `message_parent`, and background subagents can ask blocking questions with `ask_parent`; the parent replies with `reply_to_subagent`
 - **Session resume** — pick up where an agent left off, preserving full conversation context
 - **Graceful turn limits** — agents get a "wrap up" warning before hard abort, producing clean partial results instead of cut-off output
 - **Case-insensitive agent types** — `"explore"`, `"Explore"`, `"EXPLORE"` all work. Unknown types fall back to general-purpose with a note
@@ -58,6 +59,12 @@ Agent({
 ```
 
 Foreground agents block until complete and return results inline. Background agents return an ID immediately and notify you on completion.
+
+Subagents launched by this extension also get native bridge tools:
+- `message_parent` — queue a one-way update for the parent
+- `ask_parent` — queue a question and wait for `reply_to_subagent` (background agents only)
+
+These bridge messages are **queue-first**: the subagent tool call returns after enqueueing (or waits on the reply for `ask_parent`), and the parent receives the queued update at the next safe turn boundary. Delivery is scoped to the parent session that spawned the subagent. Notifications contain only metadata and `request_id`s; the parent must explicitly fetch the raw payload with `get_subagent_message`. Queued questions also wake a parent turn so the parent can fetch the payload and explicitly answer with `reply_to_subagent`.
 
 ## UI
 
@@ -211,6 +218,46 @@ Send a steering message to a running agent. The message interrupts after the cur
 |-----------|------|----------|-------------|
 | `agent_id` | string | yes | Agent ID to steer |
 | `message` | string | yes | Message to inject into agent conversation |
+
+### `get_subagent_message`
+
+Fetch the raw payload for a queued parent-bridge notification.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `request_id` | string | yes | Request ID from the queued parent-bridge notification |
+
+### `reply_to_subagent`
+
+Reply to a queued `ask_parent` request from a running subagent.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `request_id` | string | yes | Request ID from the queued parent-bridge notification |
+| `message` | string | yes | Reply text sent back to the waiting subagent |
+
+### Sub-agent bridge tools
+
+These tools are injected automatically into subagents spawned by this extension. They are not top-level user tools; the parent sees their queued output and answers with `reply_to_subagent` when needed. Queued bridge traffic is scoped to the parent session that launched the subagent.
+
+#### `message_parent`
+
+Queue a one-way update for the parent agent. The tool returns a `requestId` immediately after enqueueing.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `message` | string | yes | Update to send to the parent |
+
+#### `ask_parent`
+
+Queue a question for the parent agent and wait for a reply. This tool is only injected into background subagents to avoid deadlocking foreground runs.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `message` | string | yes | Question or request for the parent |
+| `timeout_ms` | number | no | Optional timeout while waiting for `reply_to_subagent` |
+
+**Queue-first semantics:** both bridge tools enqueue their message first. Parent updates are flushed in creation order at the next safe turn boundary and only into the originating parent session. Notifications contain metadata plus `request_id`s instead of raw subagent text. One-way updates do not auto-trigger the parent; use `get_subagent_message` to inspect them. Queued `ask_parent` questions wake a parent turn so the parent can explicitly fetch the payload and answer with `reply_to_subagent`. Timed-out asks are removed from the queue.
 
 ## Commands
 
@@ -423,6 +470,7 @@ src/
   agent-manager.ts    # Agent lifecycle, concurrency queue, completion notifications
   cross-extension-rpc.ts # RPC handlers for cross-extension spawn/ping via pi.events
   group-join.ts       # Group join manager: batched completion notifications with timeout
+  parent-bridge.ts    # Native parent↔subagent message queue + ask/reply coordination
   custom-agents.ts    # Load user-defined agents from .pi/agents/*.md
   memory.ts           # Persistent agent memory (resolve, read, build prompt blocks)
   skill-loader.ts     # Preload skill files from .pi/skills/
