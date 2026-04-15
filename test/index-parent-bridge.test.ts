@@ -129,7 +129,7 @@ describe("index parent bridge integration", () => {
     expect(content).toContain("Inspect payload with get_subagent_message");
     expect(content).not.toContain("Status update");
 
-    const requestId = content.match(/request_id: ([^\)\n]+)/)?.[1];
+    const requestId = content.match(/request_id: ([^)\n]+)/)?.[1];
     expect(requestId).toBeDefined();
 
     const fetchTool = setup.tools.get("get_subagent_message");
@@ -166,7 +166,7 @@ describe("index parent bridge integration", () => {
     expect(content).toContain("Inspect payload with get_subagent_message");
     expect(content).not.toContain("Wait for the current tool to finish");
 
-    const requestId = content.match(/request_id: ([^\)\n]+)/)?.[1];
+    const requestId = content.match(/request_id: ([^)\n]+)/)?.[1];
     expect(requestId).toBeDefined();
 
     const fetchTool = setup.tools.get("get_subagent_message");
@@ -203,7 +203,7 @@ describe("index parent bridge integration", () => {
     );
 
     const content = setup.pi.sendMessage.mock.calls[0][0].content as string;
-    const requestId = content.match(/request_id: ([^\)\n]+)/)?.[1];
+    const requestId = content.match(/request_id: ([^)\n]+)/)?.[1];
     expect(requestId).toBeDefined();
 
     await replyTool!.execute(
@@ -251,7 +251,7 @@ describe("index parent bridge integration", () => {
     );
 
     const content = setup.pi.sendMessage.mock.calls[0][0].content as string;
-    const requestId = content.match(/request_id: ([^\)\n]+)/)?.[1];
+    const requestId = content.match(/request_id: ([^)\n]+)/)?.[1];
     expect(requestId).toBeDefined();
 
     const fetchResult = await fetchTool!.execute("tool-call-fetch-3", { request_id: requestId }, undefined, undefined, busyCtx);

@@ -50,10 +50,10 @@ function expandTabsForDisplay(line: string): string {
   let column = 0;
 
   for (let i = 0; i < line.length;) {
-    const escape = readEscapeSequence(line, i);
-    if (escape) {
-      result += escape;
-      i += escape.length;
+    const escapeSequence = readEscapeSequence(line, i);
+    if (escapeSequence) {
+      result += escapeSequence;
+      i += escapeSequence.length;
       continue;
     }
 

@@ -60,8 +60,8 @@ vi.mock("../src/skill-loader.js", () => ({
   preloadSkills: vi.fn(() => []),
 }));
 
-import { getAgentConfig, getConfig } from "../src/agent-types.js";
 import { resumeAgent, runAgent } from "../src/agent-runner.js";
+import { getAgentConfig, getConfig } from "../src/agent-types.js";
 import { parentBridge } from "../src/parent-bridge.js";
 
 function createSession(finalText: string) {
