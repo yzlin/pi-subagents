@@ -15,7 +15,14 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - run: npm ci
+      - uses: oven-sh/setup-bun@v2
+      - name: Verify package-lock.json
+        run: npm ci
+      - name: Verify bun.lock stays in sync
+        run: |
+          rm -f bun.lock
+          bun install --lockfile-only
+          git diff --exit-code -- bun.lock
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run test

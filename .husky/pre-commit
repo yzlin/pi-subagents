@@ -1,0 +1,21 @@
+#!/usr/bin/env sh
+
+changed="$(git diff --cached --name-only)"
+
+has_staged() {
+  printf '%s\n' "$changed" | grep -qx "$1"
+}
+
+if has_staged "package.json"; then
+  has_staged "package-lock.json" || {
+    echo "error: package.json changed but package-lock.json is not staged"
+    echo "fix: run npm install / npm update, then git add package-lock.json"
+    exit 1
+  }
+
+  has_staged "bun.lock" || {
+    echo "error: package.json changed but bun.lock is not staged"
+    echo "fix: regenerate bun.lock from package-lock.json, then git add bun.lock"
+    exit 1
+  }
+fi
