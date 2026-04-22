@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **pi 0.68.x SDK compatibility** — subagent sessions now pass an explicit cwd into `SettingsManager.create()` and register subagent bridge tools via `customTools` while using the pi 0.68+ string-name tool allowlist contract. This fixes runtime breakage when loading the extension under newer host pi versions.
+
 ## [0.6.0] - 2026-04-13
 
 ### Changed

@@ -10,8 +10,10 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   type ExtensionAPI,
+  getAgentDir,
   SessionManager,
   SettingsManager,
+  type ToolDefinition,
 } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 
@@ -42,6 +44,10 @@ const EXCLUDED_TOOL_NAMES = [
 const NOOP = () => {
   /* noop */
 };
+
+function sdkExpectsToolAllowlist(): boolean {
+  return SettingsManager.create.length >= 1;
+}
 
 interface ToolCallContentBlock {
   type: "toolCall";
@@ -295,8 +301,8 @@ export async function runAgent(
   const config = getConfig(type);
   const agentConfig = getAgentConfig(type);
 
-  // Resolve working directory: worktree override > parent cwd
-  const effectiveCwd = options.cwd ?? ctx.cwd;
+  // Resolve working directory: worktree override > parent cwd > process cwd
+  const effectiveCwd = options.cwd ?? ctx.cwd ?? process.cwd();
 
   const env = await detectEnv(options.pi, effectiveCwd);
 
@@ -318,26 +324,23 @@ export async function runAgent(
     }
   }
 
-  type SessionTool =
-    | ReturnType<typeof getToolsForType>[number]
-    | ReturnType<typeof createParentBridgeTools>[number];
+  type BuiltinSessionTool = ReturnType<typeof getToolsForType>[number];
 
-  let tools: SessionTool[] = [...getToolsForType(type, effectiveCwd)];
-  if (options.agentId) {
-    tools = [
-      ...tools,
-      ...createParentBridgeTools(
+  let builtinTools: BuiltinSessionTool[] = [
+    ...getToolsForType(type, effectiveCwd),
+  ];
+  const customTools: ToolDefinition[] = options.agentId
+    ? createParentBridgeTools(
         options.agentId,
         options.parentSessionId,
         options.allowAskParent
-      ),
-    ];
-  }
+      )
+    : [];
 
   // Persistent memory: detect write capability and branch accordingly.
   // Account for disallowedTools — a tool in the base set but on the denylist is not truly available.
   if (agentConfig?.memory) {
-    const existingNames = new Set(tools.map((t) => t.name));
+    const existingNames = new Set(builtinTools.map((t) => t.name));
     const denied = agentConfig.disallowedTools
       ? new Set(agentConfig.disallowedTools)
       : undefined;
@@ -349,7 +352,7 @@ export async function runAgent(
       // Read-write memory: add any missing memory tools (read/write/edit)
       const memTools = getMemoryTools(effectiveCwd, existingNames);
       if (memTools.length > 0) {
-        tools = [...tools, ...memTools];
+        builtinTools = [...builtinTools, ...memTools];
       }
       extras.memoryBlock = buildMemoryBlock(
         agentConfig.name,
@@ -361,7 +364,7 @@ export async function runAgent(
       if (!existingNames.has("read")) {
         const readTools = getReadOnlyMemoryTools(effectiveCwd, existingNames);
         if (readTools.length > 0) {
-          tools = [...tools, ...readTools];
+          builtinTools = [...builtinTools, ...readTools];
         }
       }
       extras.memoryBlock = buildReadOnlyMemoryBlock(
@@ -409,8 +412,12 @@ export async function runAgent(
   const noSkills = skills === false || Array.isArray(skills);
 
   // Load extensions/skills: true or string[] → load; false → don't
+  // Explicit agentDir works around pi 0.68.x DefaultResourceLoader passing an
+  // undefined user-scope base dir into DefaultPackageManager for local packages.
+  const agentDir = getAgentDir();
   const loader = new DefaultResourceLoader({
     cwd: effectiveCwd,
+    agentDir,
     noExtensions: extensions === false,
     noSkills,
     noPromptTemplates: true,
@@ -427,15 +434,20 @@ export async function runAgent(
   // Resolve thinking level: explicit option > agent config > undefined (inherit)
   const thinkingLevel = options.thinkingLevel ?? agentConfig?.thinking;
 
+  const localToolNames = [
+    ...new Set([...builtinTools, ...customTools].map((tool) => tool.name)),
+  ];
+
   const sessionOpts: Record<string, unknown> = {
     cwd: effectiveCwd,
     sessionManager: SessionManager.inMemory(effectiveCwd),
-    settingsManager: SettingsManager.create(),
+    settingsManager: SettingsManager.create(effectiveCwd),
     modelRegistry: ctx.modelRegistry,
     model,
-    tools,
+    customTools: customTools.length > 0 ? customTools : undefined,
     resourceLoader: loader,
   };
+  sessionOpts.tools = sdkExpectsToolAllowlist() ? localToolNames : builtinTools;
   if (thinkingLevel) {
     sessionOpts.thinkingLevel = thinkingLevel;
   }
@@ -453,7 +465,7 @@ export async function runAgent(
   // Filter active tools: remove our own tools to prevent nesting,
   // apply extension allowlist if specified, and apply disallowedTools denylist
   if (extensions !== false) {
-    const builtinToolNames = new Set(tools.map((t) => t.name));
+    const localToolNameSet = new Set(localToolNames);
     const activeTools = session.getActiveToolNames().filter((t) => {
       if (EXCLUDED_TOOL_NAMES.includes(t)) {
         return false;
@@ -461,7 +473,7 @@ export async function runAgent(
       if (disallowedSet?.has(t)) {
         return false;
       }
-      if (builtinToolNames.has(t)) {
+      if (localToolNameSet.has(t)) {
         return true;
       }
       if (Array.isArray(extensions)) {
