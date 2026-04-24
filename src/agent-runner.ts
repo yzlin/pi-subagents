@@ -434,10 +434,16 @@ export async function runAgent(
   // Still pass noSkills: true since we don't need the skill loader to load them again.
   const noSkills = skills === false || Array.isArray(skills);
 
-  // Load extensions/skills: true or string[] → load; false → don't
+  const agentDir = getAgentDir();
+
+  // Load extensions/skills: true or string[] → load; false → don't.
   // Explicit agentDir works around pi 0.68.x DefaultResourceLoader passing an
   // undefined user-scope base dir into DefaultPackageManager for local packages.
-  const agentDir = getAgentDir();
+  // Suppress AGENTS.md/CLAUDE.md and APPEND_SYSTEM.md — upstream's
+  // buildSystemPrompt() re-appends both AFTER systemPromptOverride, which
+  // would defeat prompt_mode: replace and isolated: true. Parent context, if
+  // wanted, reaches the subagent via prompt_mode: append (parentSystemPrompt
+  // is embedded in systemPromptOverride) or inherit_context (conversation).
   const loader = new DefaultResourceLoader({
     cwd: effectiveCwd,
     agentDir,
@@ -445,7 +451,9 @@ export async function runAgent(
     noSkills,
     noPromptTemplates: true,
     noThemes: true,
+    noContextFiles: true,
     systemPromptOverride: () => systemPrompt,
+    appendSystemPromptOverride: () => [],
   });
   await loader.reload();
 
