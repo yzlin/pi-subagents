@@ -7,15 +7,8 @@ import type { AgentSession } from "@mariozechner/pi-coding-agent";
 
 export type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 
-/** Agent type: any string name (built-in defaults or user-defined). */
+/** Agent type: any user-defined string name. */
 export type SubagentType = string;
-
-/** Names of the three embedded default agents. */
-export const DEFAULT_AGENT_NAMES = [
-  "general-purpose",
-  "Explore",
-  "Plan",
-] as const;
 
 /** Memory scope for persistent agent memory. */
 export type MemoryScope = "user" | "project" | "local";
@@ -50,8 +43,6 @@ export interface AgentConfig {
   memory?: MemoryScope;
   /** Isolation mode — "worktree" runs the agent in a temporary git worktree */
   isolation?: IsolationMode;
-  /** true = this is an embedded default agent (informational) */
-  isDefault?: boolean;
   /** false = agent is hidden from the registry */
   enabled?: boolean;
   /** Where this agent was loaded from */

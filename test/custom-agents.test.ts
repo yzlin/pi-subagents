@@ -291,7 +291,7 @@ Real.`
     expect(result.has("real")).toBe(true);
   });
 
-  it("allows agents with names matching defaults (overrides them)", () => {
+  it("allows agents with names formerly used by defaults", () => {
     writeAgent(
       "Explore",
       `---

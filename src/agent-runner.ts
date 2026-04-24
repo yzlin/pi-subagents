@@ -298,8 +298,13 @@ export async function runAgent(
   prompt: string,
   options: RunOptions
 ): Promise<RunResult> {
-  const config = getConfig(type);
   const agentConfig = getAgentConfig(type);
+  if (!agentConfig || agentConfig.enabled === false) {
+    throw new Error(
+      `Agent type "${type}" is not defined. Create it in .pi/agents/${type}.md or ~/.pi/agent/agents/${type}.md.`
+    );
+  }
+  const config = getConfig(type);
 
   // Resolve working directory: worktree override > parent cwd > process cwd
   const effectiveCwd = options.cwd ?? ctx.cwd ?? process.cwd();
@@ -339,7 +344,7 @@ export async function runAgent(
 
   // Persistent memory: detect write capability and branch accordingly.
   // Account for disallowedTools — a tool in the base set but on the denylist is not truly available.
-  if (agentConfig?.memory) {
+  if (agentConfig.memory) {
     const existingNames = new Set(builtinTools.map((t) => t.name));
     const denied = agentConfig.disallowedTools
       ? new Set(agentConfig.disallowedTools)
@@ -375,37 +380,13 @@ export async function runAgent(
     }
   }
 
-  // Build system prompt from agent config
-  let systemPrompt: string;
-  if (agentConfig) {
-    systemPrompt = buildAgentPrompt(
-      agentConfig,
-      effectiveCwd,
-      env,
-      parentSystemPrompt,
-      extras
-    );
-  } else {
-    // Unknown type fallback: general-purpose (defensive — unreachable in practice
-    // since index.ts resolves unknown types to "general-purpose" before calling runAgent)
-    systemPrompt = buildAgentPrompt(
-      {
-        name: type,
-        description: "General-purpose agent",
-        systemPrompt: "",
-        promptMode: "append",
-        extensions: true,
-        skills: true,
-        inheritContext: false,
-        runInBackground: false,
-        isolated: false,
-      },
-      effectiveCwd,
-      env,
-      parentSystemPrompt,
-      extras
-    );
-  }
+  const systemPrompt = buildAgentPrompt(
+    agentConfig,
+    effectiveCwd,
+    env,
+    parentSystemPrompt,
+    extras
+  );
 
   // When skills is string[], we've already preloaded them into the prompt.
   // Still pass noSkills: true since we don't need the skill loader to load them again.
@@ -429,10 +410,10 @@ export async function runAgent(
   // Resolve model: explicit option > config.model > parent model
   const model =
     options.model ??
-    resolveDefaultModel(ctx.model, ctx.modelRegistry, agentConfig?.model);
+    resolveDefaultModel(ctx.model, ctx.modelRegistry, agentConfig.model);
 
   // Resolve thinking level: explicit option > agent config > undefined (inherit)
-  const thinkingLevel = options.thinkingLevel ?? agentConfig?.thinking;
+  const thinkingLevel = options.thinkingLevel ?? agentConfig.thinking;
 
   const localToolNames = [
     ...new Set([...builtinTools, ...customTools].map((tool) => tool.name)),
@@ -458,7 +439,7 @@ export async function runAgent(
   );
 
   // Build disallowed tools set from agent config
-  const disallowedSet = agentConfig?.disallowedTools
+  const disallowedSet = agentConfig.disallowedTools
     ? new Set(agentConfig.disallowedTools)
     : undefined;
 
@@ -508,7 +489,7 @@ export async function runAgent(
   // Track turns for graceful max_turns enforcement
   let turnCount = 0;
   const maxTurns = normalizeMaxTurns(
-    options.maxTurns ?? agentConfig?.maxTurns ?? defaultMaxTurns
+    options.maxTurns ?? agentConfig.maxTurns ?? defaultMaxTurns
   );
   let softLimitReached = false;
   let aborted = false;

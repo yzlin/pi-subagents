@@ -107,7 +107,8 @@ describe("/agents command", () => {
 
       const lines = component.render(120);
       expect(lines[0]).toContain("╭");
-      expect(lines.at(-1)).toContain("╰");
+      // biome-ignore lint/style/useAtIndex: test LSP target does not include Array.at.
+      expect(lines[lines.length - 1]).toContain("╰");
       expect(lines.some((line: string) => line.includes("Agents"))).toBe(true);
       done(undefined);
       return resolved;
@@ -254,7 +255,7 @@ describe("/agents command", () => {
 
     let customCallCount = 0;
     const select = vi.fn((title: string) => {
-      if (title === "Plan") {
+      if (title === "auditor") {
         return "Back";
       }
       return undefined;
@@ -278,10 +279,10 @@ describe("/agents command", () => {
         );
         done("agent-types");
       } else if (customCallCount === 2) {
-        done("Plan");
+        done("auditor");
       } else if (customCallCount === 3) {
         expect(lines.find((line: string) => line.includes("→ "))).toContain(
-          "Plan"
+          "auditor"
         );
         done(undefined);
       } else if (customCallCount === 4) {

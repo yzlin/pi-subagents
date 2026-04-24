@@ -1,8 +1,8 @@
 /**
  * agent-types.ts — Unified agent type registry.
  *
- * Merges embedded default agents with user-defined agents from .pi/agents/*.md.
- * User agents override defaults with the same name. Disabled agents are kept but excluded from spawning.
+ * Tracks user-defined agents from .pi/agents/*.md.
+ * Disabled agents are kept but excluded from spawning.
  */
 
 import {
@@ -15,7 +15,6 @@ import {
   createWriteTool,
 } from "@mariozechner/pi-coding-agent";
 
-import { DEFAULT_AGENTS } from "./default-agents.js";
 import type { AgentConfig } from "./types.js";
 
 const TOOL_FACTORIES = {
@@ -40,23 +39,16 @@ export const BUILTIN_TOOL_NAMES = Object.keys(
   TOOL_FACTORIES
 ) as BuiltinToolName[];
 
-/** Unified runtime registry of all agents (defaults + user-defined). */
+/** Unified runtime registry of user-defined agents. */
 const agents = new Map<string, AgentConfig>();
 
 /**
- * Register agents into the unified registry.
- * Starts with DEFAULT_AGENTS, then overlays user agents (overrides defaults with same name).
+ * Register user-defined agents into the unified registry.
  * Disabled agents (enabled === false) are kept in the registry but excluded from spawning.
  */
 export function registerAgents(userAgents: Map<string, AgentConfig>): void {
   agents.clear();
 
-  // Start with defaults
-  for (const [name, config] of DEFAULT_AGENTS) {
-    agents.set(name, config);
-  }
-
-  // Overlay user agents (overrides defaults with same name)
   for (const [name, config] of userAgents) {
     agents.set(name, config);
   }
@@ -99,18 +91,9 @@ export function getAllTypes(): string[] {
   return [...agents.keys()];
 }
 
-/** Get names of default agents currently in the registry. */
-export function getDefaultAgentNames(): string[] {
-  return [...agents.entries()]
-    .filter(([_, config]) => config.isDefault === true)
-    .map(([name]) => name);
-}
-
-/** Get names of user-defined agents (non-defaults) currently in the registry. */
+/** Get names of user-defined agents currently in the registry. */
 export function getUserAgentNames(): string[] {
-  return [...agents.entries()]
-    .filter(([_, config]) => config.isDefault !== true)
-    .map(([name]) => name);
+  return [...agents.keys()];
 }
 
 /** Check if a type is valid and enabled (case-insensitive). */
@@ -159,7 +142,10 @@ export function getToolsForType(type: string, cwd: string): BuiltinTool[] {
   const key = resolveKey(type);
   const raw = key ? agents.get(key) : undefined;
   const config = raw?.enabled === false ? undefined : raw;
-  const toolNames = config?.builtinToolNames?.length
+  if (!config) {
+    return [];
+  }
+  const toolNames = config.builtinToolNames?.length
     ? config.builtinToolNames
     : BUILTIN_TOOL_NAMES;
   return toolNames
@@ -167,7 +153,7 @@ export function getToolsForType(type: string, cwd: string): BuiltinTool[] {
     .map((name) => TOOL_FACTORIES[name](cwd));
 }
 
-/** Get config for a type (case-insensitive, returns a SubagentTypeConfig-compatible object). Falls back to general-purpose. */
+/** Get config for a type (case-insensitive, returns a SubagentTypeConfig-compatible object). */
 export function getConfig(type: string): {
   displayName: string;
   description: string;
@@ -189,26 +175,12 @@ export function getConfig(type: string): {
     };
   }
 
-  // Fallback for unknown/disabled types — general-purpose config
-  const gp = agents.get("general-purpose");
-  if (gp && gp.enabled !== false) {
-    return {
-      displayName: gp.displayName ?? gp.name,
-      description: gp.description,
-      builtinToolNames: gp.builtinToolNames ?? BUILTIN_TOOL_NAMES,
-      extensions: gp.extensions,
-      skills: gp.skills,
-      promptMode: gp.promptMode,
-    };
-  }
-
-  // Absolute fallback (should never happen)
   return {
-    displayName: "Agent",
-    description: "General-purpose agent for complex, multi-step tasks",
-    builtinToolNames: BUILTIN_TOOL_NAMES,
-    extensions: true,
-    skills: true,
-    promptMode: "append",
+    displayName: type,
+    description: "User-defined agent type not found",
+    builtinToolNames: [],
+    extensions: false,
+    skills: false,
+    promptMode: "replace",
   };
 }

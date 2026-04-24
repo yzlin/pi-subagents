@@ -1,6 +1,5 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { getAgentConfig, registerAgents } from "../src/agent-types.js";
 import { buildAgentPrompt } from "../src/prompts.js";
 import type { AgentConfig, EnvInfo } from "../src/types.js";
 
@@ -16,77 +15,43 @@ const envNoGit: EnvInfo = {
   platform: "linux",
 };
 
-// Initialize default agents
-beforeEach(() => {
-  registerAgents(new Map());
-});
-
-function getDefaultConfig(name: string): AgentConfig {
-  return getAgentConfig(name)!;
+function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
+  return {
+    name: "custom",
+    description: "Custom",
+    builtinToolNames: [],
+    extensions: true,
+    skills: true,
+    systemPrompt: "You are a custom agent.",
+    promptMode: "replace",
+    inheritContext: false,
+    runInBackground: false,
+    isolated: false,
+    ...overrides,
+  };
 }
 
 describe("buildAgentPrompt", () => {
   it("includes cwd and git info", () => {
-    const config = getDefaultConfig("general-purpose");
-    const prompt = buildAgentPrompt(config, "/workspace", env);
+    const prompt = buildAgentPrompt(makeConfig(), "/workspace", env);
     expect(prompt).toContain("/workspace");
     expect(prompt).toContain("Branch: main");
     expect(prompt).toContain("darwin");
   });
 
   it("handles non-git repos", () => {
-    const config = getDefaultConfig("Explore");
-    const prompt = buildAgentPrompt(config, "/workspace", envNoGit);
+    const prompt = buildAgentPrompt(makeConfig(), "/workspace", envNoGit);
     expect(prompt).toContain("Not a git repository");
     expect(prompt).not.toContain("Branch:");
   });
 
-  it("Explore prompt is read-only", () => {
-    const config = getDefaultConfig("Explore");
-    const prompt = buildAgentPrompt(config, "/workspace", env);
-    expect(prompt).toContain("READ-ONLY");
-    expect(prompt).toContain("file search specialist");
-  });
-
-  it("Plan prompt is read-only", () => {
-    const config = getDefaultConfig("Plan");
-    const prompt = buildAgentPrompt(config, "/workspace", env);
-    expect(prompt).toContain("READ-ONLY");
-    expect(prompt).toContain("software architect");
-  });
-
-  it("general-purpose uses append mode (parent twin)", () => {
-    const config = getDefaultConfig("general-purpose");
-    const parentPrompt = "You are a parent coding agent with full powers.";
-    const prompt = buildAgentPrompt(config, "/workspace", env, parentPrompt);
-    expect(prompt).toContain("parent coding agent with full powers");
-    expect(prompt).toContain("<sub_agent_context>");
-    expect(prompt).toContain("<inherited_system_prompt>");
-    expect(prompt).not.toContain("READ-ONLY");
-    // Empty systemPrompt means no <agent_instructions> section
-    expect(prompt).not.toContain("<agent_instructions>");
-  });
-
-  it("general-purpose without parent prompt falls back to generic base", () => {
-    const config = getDefaultConfig("general-purpose");
-    const prompt = buildAgentPrompt(config, "/workspace", env);
-    expect(prompt).toContain("general-purpose coding agent");
-    expect(prompt).not.toContain("READ-ONLY");
-  });
-
   it("append mode with parent prompt includes parent + custom instructions", () => {
-    const config: AgentConfig = {
+    const config = makeConfig({
       name: "appender",
       description: "Appender",
-      builtinToolNames: [],
-      extensions: true,
-      skills: true,
       systemPrompt: "Extra custom instructions here.",
       promptMode: "append",
-      inheritContext: false,
-      runInBackground: false,
-      isolated: false,
-    };
+    });
     const parentPrompt = "You are a parent coding agent with special powers.";
     const prompt = buildAgentPrompt(config, "/workspace", env, parentPrompt);
     expect(prompt).toContain("/workspace");
@@ -98,18 +63,12 @@ describe("buildAgentPrompt", () => {
   });
 
   it("append mode without parent prompt falls back to generic base", () => {
-    const config: AgentConfig = {
+    const config = makeConfig({
       name: "appender",
       description: "Appender",
-      builtinToolNames: [],
-      extensions: true,
-      skills: true,
       systemPrompt: "Extra custom instructions here.",
       promptMode: "append",
-      inheritContext: false,
-      runInBackground: false,
-      isolated: false,
-    };
+    });
     const prompt = buildAgentPrompt(config, "/workspace", env);
     expect(prompt).toContain("/workspace");
     expect(prompt).toContain("general-purpose coding agent");
@@ -117,18 +76,12 @@ describe("buildAgentPrompt", () => {
   });
 
   it("append mode with empty systemPrompt is a pure parent clone", () => {
-    const config: AgentConfig = {
+    const config = makeConfig({
       name: "clone",
       description: "Clone",
-      builtinToolNames: [],
-      extensions: true,
-      skills: true,
       systemPrompt: "",
       promptMode: "append",
-      inheritContext: false,
-      runInBackground: false,
-      isolated: false,
-    };
+    });
     const parentPrompt = "You are a parent coding agent.";
     const prompt = buildAgentPrompt(config, "/workspace", env, parentPrompt);
     expect(prompt).toContain("parent coding agent");
@@ -138,18 +91,7 @@ describe("buildAgentPrompt", () => {
   });
 
   it("replace mode uses config systemPrompt directly", () => {
-    const config: AgentConfig = {
-      name: "custom",
-      description: "Custom",
-      builtinToolNames: [],
-      extensions: true,
-      skills: true,
-      systemPrompt: "You are a specialized agent.",
-      promptMode: "replace",
-      inheritContext: false,
-      runInBackground: false,
-      isolated: false,
-    };
+    const config = makeConfig({ systemPrompt: "You are a specialized agent." });
     const prompt = buildAgentPrompt(config, "/workspace", env);
     expect(prompt).toContain("You are a specialized agent.");
     expect(prompt).toContain("/workspace");
@@ -157,18 +99,12 @@ describe("buildAgentPrompt", () => {
   });
 
   it("replace mode ignores parent prompt", () => {
-    const config: AgentConfig = {
+    const config = makeConfig({
       name: "standalone",
       description: "Standalone",
-      builtinToolNames: [],
-      extensions: true,
-      skills: true,
       systemPrompt: "You are a standalone agent.",
       promptMode: "replace",
-      inheritContext: false,
-      runInBackground: false,
-      isolated: false,
-    };
+    });
     const prompt = buildAgentPrompt(
       config,
       "/workspace",
@@ -181,7 +117,12 @@ describe("buildAgentPrompt", () => {
   });
 
   it("append mode bridge contains tool reminders", () => {
-    const config = getDefaultConfig("general-purpose");
+    const config = makeConfig({
+      name: "appender",
+      description: "Appender",
+      systemPrompt: "",
+      promptMode: "append",
+    });
     const prompt = buildAgentPrompt(
       config,
       "/workspace",
@@ -194,18 +135,12 @@ describe("buildAgentPrompt", () => {
   });
 
   it("append mode without parent prompt still has bridge", () => {
-    const config: AgentConfig = {
+    const config = makeConfig({
       name: "no-parent",
       description: "No parent",
-      builtinToolNames: [],
-      extensions: true,
-      skills: true,
       systemPrompt: "Extra stuff.",
       promptMode: "append",
-      inheritContext: false,
-      runInBackground: false,
-      isolated: false,
-    };
+    });
     const prompt = buildAgentPrompt(config, "/workspace", env);
     expect(prompt).toContain("<sub_agent_context>");
     expect(prompt).toContain("<inherited_system_prompt>");
@@ -215,18 +150,11 @@ describe("buildAgentPrompt", () => {
   });
 
   it("injects memory block in replace mode", () => {
-    const config: AgentConfig = {
+    const config = makeConfig({
       name: "mem-agent",
       description: "Memory Agent",
-      builtinToolNames: [],
-      extensions: true,
-      skills: true,
       systemPrompt: "You are a memory agent.",
-      promptMode: "replace",
-      inheritContext: false,
-      runInBackground: false,
-      isolated: false,
-    };
+    });
     const extras = {
       memoryBlock: "# Agent Memory\nYou have persistent memory at /tmp/mem/",
     };
@@ -243,18 +171,12 @@ describe("buildAgentPrompt", () => {
   });
 
   it("injects memory block in append mode", () => {
-    const config: AgentConfig = {
+    const config = makeConfig({
       name: "mem-append",
       description: "Memory Append",
-      builtinToolNames: [],
-      extensions: true,
-      skills: true,
       systemPrompt: "Custom instructions.",
       promptMode: "append",
-      inheritContext: false,
-      runInBackground: false,
-      isolated: false,
-    };
+    });
     const extras = { memoryBlock: "# Agent Memory\nPersistent memory here." };
     const prompt = buildAgentPrompt(
       config,
@@ -269,18 +191,11 @@ describe("buildAgentPrompt", () => {
   });
 
   it("injects preloaded skill blocks", () => {
-    const config: AgentConfig = {
+    const config = makeConfig({
       name: "skill-agent",
       description: "Skill Agent",
-      builtinToolNames: [],
-      extensions: true,
-      skills: true,
       systemPrompt: "You are a skill agent.",
-      promptMode: "replace",
-      inheritContext: false,
-      runInBackground: false,
-      isolated: false,
-    };
+    });
     const extras = {
       skillBlocks: [
         { name: "api-conventions", content: "Use REST endpoints." },
@@ -301,18 +216,11 @@ describe("buildAgentPrompt", () => {
   });
 
   it("injects both memory and skills", () => {
-    const config: AgentConfig = {
+    const config = makeConfig({
       name: "full-agent",
       description: "Full Agent",
-      builtinToolNames: [],
-      extensions: true,
-      skills: true,
       systemPrompt: "Full agent.",
-      promptMode: "replace",
-      inheritContext: false,
-      runInBackground: false,
-      isolated: false,
-    };
+    });
     const extras = {
       memoryBlock: "# Memory\nRemember this.",
       skillBlocks: [{ name: "skill1", content: "Skill content." }],
@@ -329,18 +237,11 @@ describe("buildAgentPrompt", () => {
   });
 
   it("no extras means no extra sections", () => {
-    const config: AgentConfig = {
+    const config = makeConfig({
       name: "plain",
       description: "Plain",
-      builtinToolNames: [],
-      extensions: true,
-      skills: true,
       systemPrompt: "Plain agent.",
-      promptMode: "replace",
-      inheritContext: false,
-      runInBackground: false,
-      isolated: false,
-    };
+    });
     const prompt = buildAgentPrompt(config, "/workspace", env);
     expect(prompt).not.toContain("Agent Memory");
     expect(prompt).not.toContain("Preloaded Skill");

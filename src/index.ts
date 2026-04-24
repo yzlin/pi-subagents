@@ -39,7 +39,6 @@ import {
   getAgentConfig,
   getAllTypes,
   getAvailableTypes,
-  getDefaultAgentNames,
   getUserAgentNames,
   registerAgents,
   resolveType,
@@ -454,7 +453,7 @@ export default function (pi: ExtensionAPI) {
     }
   );
 
-  /** Reload agents from .pi/agents/*.md and merge with defaults (called on init and each Agent invocation). */
+  /** Reload user-defined agents from .pi/agents/*.md (called on init and each Agent invocation). */
   const reloadCustomAgents = () => {
     const userAgents = loadCustomAgents(process.cwd());
     registerAgents(userAgents);
@@ -757,20 +756,31 @@ export default function (pi: ExtensionAPI) {
     pi,
     getCtx: () => currentCtx,
     manager: {
-      spawn: (piRef, ctxRef, type, prompt, options) =>
-        manager.spawn(
+      spawn: (piRef, ctxRef, type, prompt, options) => {
+        reloadCustomAgents();
+        const resolvedType = resolveType(type);
+        const agentConfig = resolvedType
+          ? getAgentConfig(resolvedType)
+          : undefined;
+        if (!(resolvedType && agentConfig) || agentConfig.enabled === false) {
+          throw new Error(
+            `Agent type "${type}" is not defined. Create it in .pi/agents/${type}.md or ~/.pi/agent/agents/${type}.md.`
+          );
+        }
+        return manager.spawn(
           piRef as ExtensionAPI,
           ctxRef as ExtensionContext,
-          type,
+          resolvedType,
           prompt,
           {
             description:
               typeof options.description === "string"
                 ? options.description
-                : type,
+                : resolvedType,
             ...options,
           }
-        ),
+        );
+      },
       abort: (id) => manager.abort(id),
     },
   });
@@ -892,10 +902,16 @@ export default function (pi: ExtensionAPI) {
 
   /** Build the full type list text dynamically from the unified registry. */
   const buildTypeListText = () => {
-    const defaultNames = getDefaultAgentNames();
     const userNames = getUserAgentNames();
 
-    const defaultDescs = defaultNames.map((name) => {
+    if (userNames.length === 0) {
+      return [
+        "No agent types are currently defined.",
+        "Define agents in .pi/agents/<name>.md (project) or ~/.pi/agent/agents/<name>.md (global).",
+      ].join("\n");
+    }
+
+    const agentDescriptions = userNames.map((name) => {
       const cfg = getAgentConfig(name);
       const modelSuffix = cfg?.model
         ? ` (${getModelLabelFromConfig(cfg.model)})`
@@ -903,17 +919,11 @@ export default function (pi: ExtensionAPI) {
       return `- ${name}: ${cfg?.description ?? name}${modelSuffix}`;
     });
 
-    const customDescs = userNames.map((name) => {
-      const cfg = getAgentConfig(name);
-      return `- ${name}: ${cfg?.description ?? name}`;
-    });
-
     return [
-      "Default agents:",
-      ...defaultDescs,
-      ...(customDescs.length > 0 ? ["", "Custom agents:", ...customDescs] : []),
+      "User-defined agents:",
+      ...agentDescriptions,
       "",
-      "Custom agents can be defined in .pi/agents/<name>.md (project) or ~/.pi/agent/agents/<name>.md (global) — they are picked up automatically. Project-level agents override global ones. Creating a .md file with the same name as a default agent overrides it.",
+      "Agents are defined in .pi/agents/<name>.md (project) or ~/.pi/agent/agents/<name>.md (global). Project-level agents override global agents.",
     ].join("\n");
   };
 
@@ -941,9 +951,7 @@ ${typeListText}
 
 Guidelines:
 - For parallel work, use run_in_background: true on each agent. Foreground calls run sequentially — only one executes at a time.
-- Use Explore for codebase searches and code understanding.
-- Use Plan for architecture and implementation planning.
-- Use general-purpose for complex tasks that need file editing.
+- Use only agent types that are defined in .pi/agents/<name>.md or ~/.pi/agent/agents/<name>.md.
 - Provide clear, detailed prompts so the agent can work autonomously.
 - Agent results are returned as text — summarize them for the user.
 - Use run_in_background for work you don't need immediately. You will be notified when it completes.
@@ -962,7 +970,7 @@ Guidelines:
           "A short (3-5 word) description of the task (shown in UI).",
       }),
       subagent_type: Type.String({
-        description: `The type of specialized agent to use. Available types: ${getAvailableTypes().join(", ")}. Custom agents from .pi/agents/*.md (project) or ~/.pi/agent/agents/*.md (global) are also available.`,
+        description: `The user-defined agent type to use. Available types: ${getAvailableTypes().join(", ") || "none"}. Define agents in .pi/agents/*.md (project) or ~/.pi/agent/agents/*.md (global).`,
       }),
       model: Type.Optional(
         Type.String({
@@ -1154,15 +1162,19 @@ Guidelines:
 
       const rawType = params.subagent_type as SubagentType;
       const resolvedType = resolveType(rawType);
-      const subagentType = resolvedType ?? "general-purpose";
-      const fellBack = resolvedType === undefined;
+      const agentConfig = resolvedType
+        ? getAgentConfig(resolvedType)
+        : undefined;
+      if (!(resolvedType && agentConfig) || agentConfig.enabled === false) {
+        return textResult(
+          `Agent type "${rawType}" is not defined. Create it in .pi/agents/${rawType}.md or ~/.pi/agent/agents/${rawType}.md, then retry.`
+        );
+      }
+      const subagentType = resolvedType;
 
       const displayName = getDisplayName(subagentType);
 
-      // Get agent config (if any)
-      const customConfig = getAgentConfig(subagentType);
-
-      const resolvedConfig = resolveAgentInvocationConfig(customConfig, params);
+      const resolvedConfig = resolveAgentInvocationConfig(agentConfig, params);
 
       // Resolve model from agent config first; tool-call params only fill gaps.
       let model = ctx.model;
@@ -1426,15 +1438,8 @@ Guidelines:
         tokens: tokenText,
       });
 
-      const fallbackNote = fellBack
-        ? `Note: Unknown agent type "${rawType}" — using general-purpose.\n\n`
-        : "";
-
       if (record.status === "error") {
-        return textResult(
-          `${fallbackNote}Agent failed: ${record.error}`,
-          details
-        );
+        return textResult(`Agent failed: ${record.error}`, details);
       }
 
       const durationMs = (record.completedAt ?? Date.now()) - record.startedAt;
@@ -1443,7 +1448,7 @@ Guidelines:
         statsParts.push(tokenText);
       }
       return textResult(
-        `${fallbackNote}Agent completed in ${formatMs(durationMs)} (${statsParts.join(", ")})${getStatusNote(record.status)}.\n\n` +
+        `Agent completed in ${formatMs(durationMs)} (${statsParts.join(", ")})${getStatusNote(record.status)}.\n\n` +
           (record.result?.trim() || "No output."),
         details
       );
@@ -1740,7 +1745,7 @@ Guidelines:
       options.push({
         value: "agent-types",
         label: `Agent types (${allNames.length})`,
-        description: "Browse and manage built-in and custom agent types",
+        description: "Browse and manage user-defined agent types",
       });
     }
 
@@ -1791,8 +1796,8 @@ Guidelines:
       return;
     }
 
-    // Source indicators: defaults unmarked, custom agents get • (project) or ◦ (global)
-    // Disabled agents get ✕ prefix
+    // Source indicators: project agents get •, global agents get ◦.
+    // Disabled agents get ✕ prefix.
     const sourceIndicator = (cfg: AgentConfig | undefined) => {
       const disabled = cfg?.enabled === false;
       if (cfg?.source === "project") {
@@ -1819,15 +1824,15 @@ Guidelines:
       };
     });
 
-    const hasCustom = allNames.some((n) => {
-      const c = getAgentConfig(n);
-      return c && !c.isDefault && c.enabled !== false;
+    const hasSourceIndicator = allNames.some((name) => {
+      const source = getAgentConfig(name)?.source;
+      return source === "project" || source === "global";
     });
     const hasDisabled = allNames.some(
       (n) => getAgentConfig(n)?.enabled === false
     );
     const legendParts: string[] = [];
-    if (hasCustom) {
+    if (hasSourceIndicator) {
       legendParts.push("• = project  ◦ = global");
     }
     if (hasDisabled) {
@@ -1933,25 +1938,12 @@ Guidelines:
     }
 
     const file = findAgentFile(name);
-    const isDefault = cfg.isDefault === true;
     const disabled = cfg.enabled === false;
 
-    let menuOptions: string[];
-    if (disabled && file) {
-      // Disabled agent with a file — offer Enable
-      menuOptions = isDefault
-        ? ["Enable", "Edit", "Reset to default", "Delete", "Back"]
-        : ["Enable", "Edit", "Delete", "Back"];
-    } else if (isDefault && !file) {
-      // Default agent with no .md override
-      menuOptions = ["Eject (export as .md)", "Disable", "Back"];
-    } else if (isDefault && file) {
-      // Default agent with .md override (ejected)
-      menuOptions = ["Edit", "Disable", "Reset to default", "Delete", "Back"];
-    } else {
-      // User-defined agent
-      menuOptions = ["Edit", "Disable", "Delete", "Back"];
-    }
+    const menuOptions =
+      disabled && file
+        ? ["Enable", "Edit", "Delete", "Back"]
+        : ["Edit", "Disable", "Delete", "Back"];
 
     const choice = await ctx.ui.select(name, menuOptions);
     if (!choice || choice === "Back") {
@@ -1979,18 +1971,6 @@ Guidelines:
           ctx.ui.notify(`Deleted ${file.path}`, "info");
         }
       }
-    } else if (choice === "Reset to default" && file) {
-      const confirmed = await ctx.ui.confirm(
-        "Reset to default",
-        `Delete override ${file.path} and restore embedded default?`
-      );
-      if (confirmed) {
-        unlinkSync(file.path);
-        reloadCustomAgents();
-        ctx.ui.notify(`Restored default ${name}`, "info");
-      }
-    } else if (choice.startsWith("Eject")) {
-      await ejectAgent(ctx, name, cfg);
     } else if (choice === "Disable") {
       await disableAgent(ctx, name);
     } else if (choice === "Enable") {
@@ -1998,91 +1978,7 @@ Guidelines:
     }
   }
 
-  /** Eject a default agent: write its embedded config as a .md file. */
-  async function ejectAgent(
-    ctx: ExtensionCommandContext,
-    name: string,
-    cfg: AgentConfig
-  ) {
-    const location = await ctx.ui.select("Choose location", [
-      "Project (.pi/agents/)",
-      "Personal (~/.pi/agent/agents/)",
-    ]);
-    if (!location) {
-      return;
-    }
-
-    const targetDir = location.startsWith("Project")
-      ? projectAgentsDir()
-      : personalAgentsDir();
-    mkdirSync(targetDir, { recursive: true });
-
-    const targetPath = join(targetDir, `${name}.md`);
-    if (existsSync(targetPath)) {
-      const overwrite = await ctx.ui.confirm(
-        "Overwrite",
-        `${targetPath} already exists. Overwrite?`
-      );
-      if (!overwrite) {
-        return;
-      }
-    }
-
-    // Build the .md file content
-    const fmFields: string[] = [];
-    fmFields.push(`description: ${cfg.description}`);
-    if (cfg.displayName) {
-      fmFields.push(`display_name: ${cfg.displayName}`);
-    }
-    fmFields.push(`tools: ${cfg.builtinToolNames?.join(", ") || "all"}`);
-    if (cfg.model) {
-      fmFields.push(`model: ${cfg.model}`);
-    }
-    if (cfg.thinking) {
-      fmFields.push(`thinking: ${cfg.thinking}`);
-    }
-    if (cfg.maxTurns) {
-      fmFields.push(`max_turns: ${cfg.maxTurns}`);
-    }
-    fmFields.push(`prompt_mode: ${cfg.promptMode}`);
-    if (cfg.extensions === false) {
-      fmFields.push("extensions: false");
-    } else if (Array.isArray(cfg.extensions)) {
-      fmFields.push(`extensions: ${cfg.extensions.join(", ")}`);
-    }
-    if (cfg.skills === false) {
-      fmFields.push("skills: false");
-    } else if (Array.isArray(cfg.skills)) {
-      fmFields.push(`skills: ${cfg.skills.join(", ")}`);
-    }
-    if (cfg.disallowedTools?.length) {
-      fmFields.push(`disallowed_tools: ${cfg.disallowedTools.join(", ")}`);
-    }
-    if (cfg.inheritContext) {
-      fmFields.push("inherit_context: true");
-    }
-    if (cfg.runInBackground) {
-      fmFields.push("run_in_background: true");
-    }
-    if (cfg.isolated) {
-      fmFields.push("isolated: true");
-    }
-    if (cfg.memory) {
-      fmFields.push(`memory: ${cfg.memory}`);
-    }
-    if (cfg.isolation) {
-      fmFields.push(`isolation: ${cfg.isolation}`);
-    }
-
-    const content = `---\n${fmFields.join("\n")}\n---\n\n${cfg.systemPrompt}\n`;
-
-    const { writeFileSync } = await import("node:fs");
-    writeFileSync(targetPath, content, "utf-8");
-    reloadCustomAgents();
-    ctx.ui.notify(`Ejected ${name} to ${targetPath}`, "info");
-  }
-
-  /** Disable an agent: set enabled: false in its .md file, or create a stub for built-in defaults. */
+  /** Disable an agent by setting enabled: false in its .md file. */
   async function disableAgent(ctx: ExtensionCommandContext, name: string) {
     const file = findAgentFile(name);
     if (file) {
@@ -2103,25 +1999,7 @@ Guidelines:
       return;
     }
 
-    // No file (built-in default) — create a stub
-    const location = await ctx.ui.select("Choose location", [
-      "Project (.pi/agents/)",
-      "Personal (~/.pi/agent/agents/)",
-    ]);
-    if (!location) {
-      return;
-    }
-
-    const targetDir = location.startsWith("Project")
-      ? projectAgentsDir()
-      : personalAgentsDir();
-    mkdirSync(targetDir, { recursive: true });
-
-    const targetPath = join(targetDir, `${name}.md`);
-    const { writeFileSync } = await import("node:fs");
-    writeFileSync(targetPath, "---\nenabled: false\n---\n", "utf-8");
-    reloadCustomAgents();
-    ctx.ui.notify(`Disabled ${name} (${targetPath})`, "info");
+    ctx.ui.notify(`Cannot disable ${name}: no agent file found.`, "warning");
   }
 
   /** Enable a disabled agent by removing enabled: false from its frontmatter. */
@@ -2135,16 +2013,9 @@ Guidelines:
     const updated = content.replace(DISABLED_FRONTMATTER_RE, "$1");
     const { writeFileSync } = await import("node:fs");
 
-    // If the file was just a stub ("---\n---\n"), delete it to restore the built-in default
-    if (updated.trim() === "---\n---" || updated.trim() === "---\n---\n") {
-      unlinkSync(file.path);
-      reloadCustomAgents();
-      ctx.ui.notify(`Enabled ${name} (removed ${file.path})`, "info");
-    } else {
-      writeFileSync(file.path, updated, "utf-8");
-      reloadCustomAgents();
-      ctx.ui.notify(`Enabled ${name} (${file.path})`, "info");
-    }
+    writeFileSync(file.path, updated, "utf-8");
+    reloadCustomAgents();
+    ctx.ui.notify(`Enabled ${name} (${file.path})`, "info");
   }
 
   async function showCreateWizard(ctx: ExtensionCommandContext) {
@@ -2160,16 +2031,18 @@ Guidelines:
       ? projectAgentsDir()
       : personalAgentsDir();
 
-    const method = await ctx.ui.select("Creation method", [
-      "Generate with Claude (recommended)",
-      "Manual configuration",
-    ]);
+    const availableTypes = getAvailableTypes();
+    const canGenerate = availableTypes.length > 0;
+    const methodOptions = canGenerate
+      ? ["Generate with existing agent", "Manual configuration"]
+      : ["Manual configuration"];
+    const method = await ctx.ui.select("Creation method", methodOptions);
     if (!method) {
       return;
     }
 
     if (method.startsWith("Generate")) {
-      await showGenerateWizard(ctx, targetDir);
+      await showGenerateWizard(ctx, targetDir, availableTypes);
     } else {
       await showManualWizard(ctx, targetDir);
     }
@@ -2177,7 +2050,8 @@ Guidelines:
 
   async function showGenerateWizard(
     ctx: ExtensionCommandContext,
-    targetDir: string
+    targetDir: string,
+    availableTypes: string[]
   ) {
     const description = await ctx.ui.input(
       "Describe what this agent should do"
@@ -2188,6 +2062,14 @@ Guidelines:
 
     const name = await ctx.ui.input("Agent name (filename, no spaces)");
     if (!name) {
+      return;
+    }
+
+    const generatorType = await ctx.ui.select(
+      "Generator agent",
+      availableTypes
+    );
+    if (!generatorType) {
       return;
     }
 
@@ -2236,7 +2118,7 @@ isolation: <"worktree" to run in isolated git worktree. Omit for normal>
 Guidelines for choosing settings:
 - For read-only tasks (review, analysis): tools: read, bash, grep, find, ls
 - For code modification tasks: include edit, write
-- Use prompt_mode: append if the agent should keep the default system prompt and add specialization on top
+- Use prompt_mode: append if the agent should keep the parent system prompt and add specialization on top
 - Use prompt_mode: replace for fully custom agents with their own personality/instructions
 - Set inherit_context: true if the agent needs to know what was discussed in the parent conversation
 - Set isolated: true if the agent should NOT have access to MCP servers or other extensions
@@ -2247,7 +2129,7 @@ Write the file using the write tool. Only write the file, nothing else.`;
     const record = await manager.spawnAndWait(
       pi,
       ctx,
-      "general-purpose",
+      generatorType,
       generatePrompt,
       {
         description: `Generate ${name} agent`,
