@@ -12,7 +12,6 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type {
@@ -21,9 +20,9 @@ import type {
   ExtensionCommandContext,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-
 import { AgentManager } from "./agent-manager.js";
 import {
   getAgentConversation,
@@ -942,7 +941,7 @@ export default function (pi: ExtensionAPI) {
       "User-defined agents:",
       ...agentDescriptions,
       "",
-      "Agents are defined in .pi/agents/<name>.md (project) or ~/.pi/agent/agents/<name>.md (global). Project-level agents override global agents.",
+      `Agents are defined in .pi/agents/<name>.md (project) or ${getAgentDir()}/agents/<name>.md (global). Project-level agents override global agents.`,
     ].join("\n");
   };
 
@@ -989,7 +988,7 @@ Guidelines:
           "A short (3-5 word) description of the task (shown in UI).",
       }),
       subagent_type: Type.String({
-        description: `The user-defined agent type to use. Available types: ${getAvailableTypes().join(", ") || "none"}. Define agents in .pi/agents/*.md (project) or ~/.pi/agent/agents/*.md (global).`,
+        description: `The user-defined agent type to use. Available types: ${getAvailableTypes().join(", ") || "none"}. Define agents in .pi/agents/*.md (project) or ${getAgentDir()}/agents/*.md (global).`,
       }),
       model: Type.Optional(
         Type.String({
@@ -1728,7 +1727,7 @@ Guidelines:
   // ---- /agents interactive menu ----
 
   const projectAgentsDir = () => join(process.cwd(), ".pi", "agents");
-  const personalAgentsDir = () => join(homedir(), ".pi", "agent", "agents");
+  const personalAgentsDir = () => join(getAgentDir(), "agents");
 
   /** Find the file path of a custom agent by name (project first, then global). */
   function findAgentFile(
@@ -2068,7 +2067,7 @@ Guidelines:
   async function showCreateWizard(ctx: ExtensionCommandContext) {
     const location = await ctx.ui.select("Choose location", [
       "Project (.pi/agents/)",
-      "Personal (~/.pi/agent/agents/)",
+      `Personal (${personalAgentsDir()})`,
     ]);
     if (!location) {
       return;
