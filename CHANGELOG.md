@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Caveman frontmatter for subagents** — agent files can now set boolean `caveman` frontmatter to ask the caveman extension RPC to apply or remove caveman prompt text before child session creation. Runs are tagged as `caveman:on`, `caveman:off`, or `caveman:unavailable` for UI/status display.
+- **Caveman RPC warning handling** — invalid `caveman` frontmatter, unavailable RPC, or apply failures are reported as non-fatal warnings; foreground runs can show warning notifications while agents continue with the unmodified prompt.
+
 ### Changed
 - **No embedded default agents** — the extension no longer ships `general-purpose`, `Explore`, or `Plan`. Users must define agent types in `.pi/agents/<name>.md` or `~/.pi/agent/agents/<name>.md`; unknown types now return setup guidance instead of falling back.
 

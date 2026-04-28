@@ -21,12 +21,13 @@ const mockCtx = { cwd: "/tmp" } as any;
 
 const mockSession = () => ({ dispose: vi.fn() }) as any;
 
-const resolvedRun = () =>
+const resolvedRun = (warnings: string[] = []) =>
   vi.mocked(runAgent).mockResolvedValue({
     responseText: "done",
     session: mockSession(),
     aborted: false,
     steered: false,
+    warnings,
   });
 
 describe("AgentManager — Bug 1 race condition (resultConsumed vs onComplete)", () => {
@@ -107,6 +108,41 @@ describe("AgentManager — Bug 1 race condition (resultConsumed vs onComplete)",
 
     expect(onCompleteCalled).toBe(false);
   });
+
+  it("keeps background warnings off transient UI and stores them on the record", async () => {
+    manager = new AgentManager();
+    resolvedRun(["background warning"]);
+
+    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+      description: "test",
+      isBackground: true,
+    });
+    await manager.getRecord(id)!.promise;
+
+    expect(vi.mocked(runAgent).mock.calls[0][3]).toEqual(
+      expect.objectContaining({ notifyWarnings: false })
+    );
+    expect(manager.getRecord(id)!.warnings).toEqual(["background warning"]);
+  });
+
+  it("keeps background warnings when the run later fails", async () => {
+    manager = new AgentManager();
+    vi.mocked(runAgent).mockImplementation((_ctx, _type, _prompt, opts) => {
+      opts.onWarning?.(["pre-failure warning"]);
+      return Promise.reject(new Error("boom"));
+    });
+
+    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+      description: "test",
+      isBackground: true,
+    });
+    await manager.getRecord(id)!.promise;
+
+    const record = manager.getRecord(id)!;
+    expect(record.status).toBe("error");
+    expect(record.error).toBe("boom");
+    expect(record.warnings).toEqual(["pre-failure warning"]);
+  });
 });
 
 describe("AgentManager — Bug 3 clearCompleted", () => {
@@ -176,6 +212,7 @@ describe("AgentManager — Bug 3 clearCompleted", () => {
       session: sess as any,
       aborted: false,
       steered: false,
+      warnings: [],
     });
 
     const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {

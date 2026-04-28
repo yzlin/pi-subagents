@@ -122,6 +122,61 @@ const ctx = {
 
 const pi = {} as any;
 
+function createPiWithCavemanRpc(options?: {
+  capabilities?: "success" | "timeout";
+  apply?: "success" | "failure";
+}) {
+  const handlers = new Map<string, (payload: unknown) => void>();
+  return {
+    events: {
+      on(channel: string, handler: (payload: unknown) => void) {
+        handlers.set(channel, handler);
+        return () => handlers.delete(channel);
+      },
+      emit(channel: string, payload: unknown) {
+        if (channel === "caveman:rpc:capabilities") {
+          if (options?.capabilities === "timeout") {
+            return;
+          }
+          (payload as { respond: (response: unknown) => void }).respond({
+            success: true,
+            data: { version: 1, supportsApply: true },
+          });
+          return;
+        }
+        if (channel === "caveman:rpc:apply") {
+          const request = payload as {
+            enabled: boolean;
+            systemPrompt: string;
+            respond: (response: unknown) => void;
+          };
+          if (options?.apply === "failure") {
+            request.respond({ success: false, error: "nope" });
+            return;
+          }
+          request.respond({
+            success: true,
+            data: {
+              version: 1,
+              systemPrompt: `${request.systemPrompt}\n\ncaveman:${request.enabled}`,
+            },
+          });
+          return;
+        }
+        handlers.get(channel)?.(payload);
+      },
+    },
+  } as any;
+}
+
+function createCtxWithWarnings() {
+  return {
+    ...ctx,
+    hasUI: true,
+    ui: { notify: vi.fn() },
+  } as any;
+}
+
 beforeEach(() => {
   createAgentSession.mockReset();
   settingsManagerCreate.mockClear();
@@ -179,6 +234,126 @@ describe("agent-runner final output capture", () => {
         agentDir: "/Users/test/.pi/agent",
       })
     );
+  });
+
+  it("applies caveman RPC before creating the child session", async () => {
+    const { session } = createSession("BOUND");
+    const onRunTag = vi.fn();
+    createAgentSession.mockResolvedValue({ session });
+    vi.mocked(getAgentConfig).mockReturnValue({
+      ...DEFAULT_AGENT_CONFIG,
+      caveman: true,
+    } as any);
+
+    await runAgent(ctx, "Explore", "Say BOUND", {
+      pi: createPiWithCavemanRpc(),
+      onRunTag,
+    });
+
+    expect(resourceLoaderOptions[0].systemPromptOverride()).toBe(
+      "system prompt\n\ncaveman:true"
+    );
+    expect(onRunTag).toHaveBeenCalledWith("caveman:on");
+  });
+
+  it("applies caveman RPC false before creating the child session", async () => {
+    const { session } = createSession("BOUND");
+    const onRunTag = vi.fn();
+    createAgentSession.mockResolvedValue({ session });
+    vi.mocked(getAgentConfig).mockReturnValue({
+      ...DEFAULT_AGENT_CONFIG,
+      caveman: false,
+    } as any);
+
+    await runAgent(ctx, "Explore", "Say BOUND", {
+      pi: createPiWithCavemanRpc(),
+      onRunTag,
+    });
+
+    expect(resourceLoaderOptions[0].systemPromptOverride()).toBe(
+      "system prompt\n\ncaveman:false"
+    );
+    expect(onRunTag).toHaveBeenCalledWith("caveman:off");
+  });
+
+  it("warns and ignores caveman when the RPC capability hook times out", async () => {
+    const { session } = createSession("BOUND");
+    const onRunTag = vi.fn();
+    const warningCtx = createCtxWithWarnings();
+    createAgentSession.mockResolvedValue({ session });
+    vi.mocked(getAgentConfig).mockReturnValue({
+      ...DEFAULT_AGENT_CONFIG,
+      caveman: true,
+    } as any);
+
+    const result = await runAgent(warningCtx, "Explore", "Say BOUND", {
+      pi: createPiWithCavemanRpc({ capabilities: "timeout" }),
+      onRunTag,
+    });
+
+    expect(result.warnings).toEqual([
+      "Caveman mode requested but caveman RPC is unavailable.",
+    ]);
+    expect(resourceLoaderOptions[0].systemPromptOverride()).toBe(
+      "system prompt"
+    );
+    expect(onRunTag).toHaveBeenCalledWith("caveman:unavailable");
+    expect(warningCtx.ui.notify).toHaveBeenCalledWith(
+      "Caveman mode requested but caveman RPC is unavailable.",
+      "warning"
+    );
+  });
+
+  it("warns and ignores caveman when the RPC apply hook fails", async () => {
+    const { session } = createSession("BOUND");
+    const onRunTag = vi.fn();
+    const warningCtx = createCtxWithWarnings();
+    createAgentSession.mockResolvedValue({ session });
+    vi.mocked(getAgentConfig).mockReturnValue({
+      ...DEFAULT_AGENT_CONFIG,
+      caveman: true,
+    } as any);
+
+    const result = await runAgent(warningCtx, "Explore", "Say BOUND", {
+      pi: createPiWithCavemanRpc({ apply: "failure" }),
+      onRunTag,
+    });
+
+    expect(result.warnings).toEqual([
+      "Caveman mode requested but caveman RPC apply failed.",
+    ]);
+    expect(resourceLoaderOptions[0].systemPromptOverride()).toBe(
+      "system prompt"
+    );
+    expect(onRunTag).toHaveBeenCalledWith("caveman:unavailable");
+    expect(warningCtx.ui.notify).toHaveBeenCalledWith(
+      "Caveman mode requested but caveman RPC apply failed.",
+      "warning"
+    );
+  });
+
+  it("does not notify when warnings are configured as result-only", async () => {
+    const { session } = createSession("BOUND");
+    const warningCtx = createCtxWithWarnings();
+    createAgentSession.mockResolvedValue({ session });
+    vi.mocked(getAgentConfig).mockReturnValue({
+      ...DEFAULT_AGENT_CONFIG,
+      caveman: true,
+      frontmatterWarnings: [
+        'Agent "bad-caveman" has non-boolean caveman frontmatter; ignoring it.',
+      ],
+    } as any);
+
+    const result = await runAgent(warningCtx, "Explore", "Say BOUND", {
+      pi: createPiWithCavemanRpc({ capabilities: "timeout" }),
+      notifyWarnings: false,
+    });
+
+    expect(warningCtx.ui.notify).not.toHaveBeenCalled();
+    expect(result.warnings).toEqual([
+      'Agent "bad-caveman" has non-boolean caveman frontmatter; ignoring it.',
+      "Caveman mode requested but caveman RPC is unavailable.",
+    ]);
   });
 
   it("binds extensions before prompting", async () => {

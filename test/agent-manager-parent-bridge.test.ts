@@ -31,6 +31,7 @@ const resolvedRun = () =>
     session: mockSession(),
     aborted: false,
     steered: false,
+    warnings: [],
   });
 
 describe("AgentManager parent bridge lifecycle", () => {

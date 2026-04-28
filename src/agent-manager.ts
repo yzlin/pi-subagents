@@ -39,6 +39,14 @@ function getParentSessionId(ctx: ExtensionContext): string | undefined {
   return ctx.sessionManager?.getSessionId?.();
 }
 
+function setRunTag(record: AgentRecord, tag: string): void {
+  const prefix = tag.split(":").slice(0, 2).join(":");
+  record.tags = [
+    ...(record.tags ?? []).filter((t) => !t.startsWith(prefix)),
+    tag,
+  ];
+}
+
 export type OnAgentComplete = (record: AgentRecord) => void;
 export type OnAgentStart = (record: AgentRecord) => void;
 
@@ -198,6 +206,13 @@ export class AgentManager {
       },
       onTurnEnd: options.onTurnEnd,
       onTextDelta: options.onTextDelta,
+      onRunTag: (tag) => {
+        setRunTag(record, tag);
+      },
+      onWarning: (warnings) => {
+        record.warnings = warnings.length > 0 ? warnings : undefined;
+      },
+      notifyWarnings: !options.isBackground,
       onSessionCreated: (session) => {
         record.session = session;
         // Flush any steers that arrived before the session was ready
@@ -210,7 +225,8 @@ export class AgentManager {
         options.onSessionCreated?.(session);
       },
     })
-      .then(({ responseText, session, aborted, steered }) => {
+      .then(({ responseText, session, aborted, steered, warnings }) => {
+        record.warnings = warnings.length > 0 ? warnings : undefined;
         // Don't overwrite status if externally stopped via abort()
         if (record.status !== "stopped") {
           if (aborted) {

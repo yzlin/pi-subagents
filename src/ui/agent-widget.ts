@@ -99,6 +99,8 @@ export interface AgentDetails {
   thinkingLevel?: ThinkingLevel;
   /** Notable config tags (e.g. ["isolated"]). */
   tags?: string[];
+  /** Non-fatal warnings produced while preparing or running the agent. */
+  warnings?: string[];
   /** Current turn count. */
   turnCount?: number;
   /** Effective max turns (undefined = unlimited). */
@@ -304,6 +306,7 @@ export class AgentWidget {
       startedAt: number;
       completedAt?: number;
       error?: string;
+      tags?: string[];
     },
     theme: Theme
   ): string {
@@ -334,6 +337,9 @@ export class AgentWidget {
 
     const parts: string[] = [];
     const activity = this.agentActivity.get(a.id);
+    if (a.tags) {
+      parts.push(...a.tags);
+    }
     if (activity) {
       parts.push(formatTurns(activity.turnCount, activity.maxTurns));
     }
@@ -410,6 +416,9 @@ export class AgentWidget {
       const configTag = formatAgentConfigTag(a.modelName, a.thinkingLevel);
       if (configTag) {
         parts.push(configTag);
+      }
+      if (a.tags) {
+        parts.push(...a.tags);
       }
       if (bg) {
         parts.push(formatTurns(bg.turnCount, bg.maxTurns));

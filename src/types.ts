@@ -43,6 +43,10 @@ export interface AgentConfig {
   memory?: MemoryScope;
   /** Isolation mode — "worktree" runs the agent in a temporary git worktree */
   isolation?: IsolationMode;
+  /** Request caveman prompt application through the caveman extension RPC. */
+  caveman?: boolean;
+  /** Non-fatal frontmatter warnings found while loading this agent. */
+  frontmatterWarnings?: string[];
   /** false = agent is hidden from the registry */
   enabled?: boolean;
   /** Where this agent was loaded from */
@@ -85,6 +89,10 @@ export interface AgentRecord {
   worktree?: { path: string; branch: string };
   /** Worktree cleanup result after agent completion. */
   worktreeResult?: { hasChanges: boolean; branch?: string };
+  /** Notable run tags, shown in UI/lifecycle metadata. */
+  tags?: string[];
+  /** Non-fatal warnings produced while preparing or running the agent. */
+  warnings?: string[];
   /** The tool_use_id from the original Agent tool call. */
   toolCallId?: string;
   /** Path to the streaming output transcript file. */
@@ -106,6 +114,10 @@ export interface NotificationDetails {
   outputFile?: string;
   error?: string;
   resultPreview: string;
+  /** Notable run tags, shown in UI metadata. */
+  tags?: string[];
+  /** Non-fatal warnings produced while preparing or running the agent. */
+  warnings?: string[];
   /** Additional agents in a group notification. */
   others?: NotificationDetails[];
 }

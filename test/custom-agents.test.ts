@@ -72,6 +72,49 @@ You are a security auditor.`
     expect(agent.systemPrompt).toBe("You are a security auditor.");
   });
 
+  it("parses boolean caveman frontmatter", () => {
+    writeAgent(
+      "caveman-on",
+      `---
+caveman: true
+---
+
+Caveman agent.`
+    );
+    writeAgent(
+      "caveman-off",
+      `---
+caveman: false
+---
+
+Non-caveman agent.`
+    );
+
+    const result = loadCustomAgents(tmpDir);
+    expect(result.get("caveman-on")!.caveman).toBe(true);
+    expect(result.get("caveman-on")!.frontmatterWarnings).toBeUndefined();
+    expect(result.get("caveman-off")!.caveman).toBe(false);
+    expect(result.get("caveman-off")!.frontmatterWarnings).toBeUndefined();
+  });
+
+  it("ignores non-boolean caveman frontmatter with a warning", () => {
+    writeAgent(
+      "bad-caveman",
+      `---
+caveman: yes please
+---
+
+Bad caveman field.`
+    );
+
+    const result = loadCustomAgents(tmpDir);
+    const agent = result.get("bad-caveman")!;
+    expect(agent.caveman).toBeUndefined();
+    expect(agent.frontmatterWarnings).toEqual([
+      'Agent "bad-caveman" has non-boolean caveman frontmatter; ignoring it.',
+    ]);
+  });
+
   it("uses sensible defaults when frontmatter is empty", () => {
     writeAgent(
       "minimal",

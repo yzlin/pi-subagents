@@ -250,6 +250,13 @@ function getStatusNote(status: string): string {
   }
 }
 
+function formatWarningBlock(warnings?: string[]): string {
+  if (!warnings?.length) {
+    return "";
+  }
+  return `Warnings:\n${warnings.map((warning) => `- ${warning}`).join("\n")}`;
+}
+
 /** Escape XML special characters to prevent injection in structured notifications. */
 function escapeXml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -292,6 +299,12 @@ function formatTaskNotification(
       ? `<output-file>${escapeXml(record.outputFile)}</output-file>`
       : null,
     `<status>${escapeXml(status)}</status>`,
+    record.tags?.length
+      ? `<tags>${record.tags.map(escapeXml).join(",")}</tags>`
+      : null,
+    record.warnings?.length
+      ? `<warnings>${record.warnings.map(escapeXml).join("\n")}</warnings>`
+      : null,
     `<summary>Agent "${escapeXml(record.description)}" ${record.status}</summary>`,
     `<result>${escapeXml(resultPreview)}</result>`,
     `<usage><total_tokens>${totalTokens}</total_tokens><tool_uses>${record.toolUses}</tool_uses><duration_ms>${durationMs}</duration_ms></usage>`,
@@ -320,12 +333,16 @@ function buildDetails(
     error?: string;
     id?: string;
     session?: AgentSession;
+    tags?: string[];
+    warnings?: string[];
   },
   activity?: AgentActivity,
   overrides?: Partial<AgentDetails>
 ): AgentDetails {
+  const tags = [...(base.tags ?? []), ...(record.tags ?? [])];
   return {
     ...base,
+    tags: tags.length > 0 ? tags : undefined,
     toolUses: record.toolUses,
     tokens: safeFormatTokens(record.session),
     turnCount: activity?.turnCount,
@@ -334,6 +351,7 @@ function buildDetails(
     status: record.status as AgentDetails["status"],
     agentId: record.id,
     error: record.error,
+    warnings: record.warnings,
     ...overrides,
   };
 }
@@ -373,6 +391,8 @@ function buildNotificationDetails(
     outputFile: record.outputFile,
     error: record.error,
     resultPreview,
+    tags: record.tags,
+    warnings: record.warnings,
   };
 }
 
@@ -408,6 +428,9 @@ export default function (pi: ExtensionAPI) {
         const parts: string[] = [];
         if (details.turnCount > 0) {
           parts.push(formatTurns(details.turnCount, details.maxTurns));
+        }
+        if (details.tags) {
+          parts.push(...details.tags);
         }
         if (details.toolUses > 0) {
           parts.push(
@@ -649,6 +672,7 @@ export default function (pi: ExtensionAPI) {
       toolUses: record.toolUses,
       durationMs,
       tokens,
+      tags: record.tags,
     };
   }
 
@@ -677,6 +701,7 @@ export default function (pi: ExtensionAPI) {
         error: record.error,
         startedAt: record.startedAt,
         completedAt: record.completedAt,
+        tags: record.tags,
       });
 
       flushQueuedParentBridgeMessages();
@@ -1438,8 +1463,14 @@ Guidelines:
         tokens: tokenText,
       });
 
+      const warningBlock = formatWarningBlock(record.warnings);
       if (record.status === "error") {
-        return textResult(`Agent failed: ${record.error}`, details);
+        return textResult(
+          [`Agent failed: ${record.error}`, warningBlock]
+            .filter(Boolean)
+            .join("\n\n"),
+          details
+        );
       }
 
       const durationMs = (record.completedAt ?? Date.now()) - record.startedAt;
@@ -1448,8 +1479,13 @@ Guidelines:
         statsParts.push(tokenText);
       }
       return textResult(
-        `Agent completed in ${formatMs(durationMs)} (${statsParts.join(", ")})${getStatusNote(record.status)}.\n\n` +
-          (record.result?.trim() || "No output."),
+        [
+          `Agent completed in ${formatMs(durationMs)} (${statsParts.join(", ")})${getStatusNote(record.status)}.`,
+          warningBlock,
+          record.result?.trim() || "No output.",
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
         details
       );
     },
@@ -1509,6 +1545,11 @@ Guidelines:
         `Type: ${displayName} | Status: ${record.status} | ${toolStats} | Duration: ${duration}\n` +
         `Description: ${record.description}\n\n`;
 
+      const warningBlock = formatWarningBlock(record.warnings);
+      if (warningBlock) {
+        output += `${warningBlock}\n\n`;
+      }
+
       if (record.status === "running") {
         output += "Agent is still running. Use wait: true or check back later.";
       } else if (record.status === "error") {
@@ -1531,7 +1572,19 @@ Guidelines:
         }
       }
 
-      return textResult(output);
+      return textResult(
+        output,
+        buildDetails(
+          {
+            displayName,
+            description: record.description,
+            subagentType: record.type,
+            modelName: record.modelName,
+            thinkingLevel: record.thinkingLevel,
+          },
+          record
+        )
+      );
     },
   });
 

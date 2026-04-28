@@ -24,6 +24,7 @@ import {
   getReadOnlyMemoryTools,
   getToolsForType,
 } from "./agent-types.js";
+import { applyCavemanRpc } from "./caveman-rpc.js";
 import { buildParentContext, extractText } from "./context.js";
 import { detectEnv } from "./env.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "./memory.js";
@@ -157,6 +158,12 @@ export interface RunOptions {
   onSessionCreated?: (session: AgentSession) => void;
   /** Called at the end of each agentic turn with the cumulative count. */
   onTurnEnd?: (turnCount: number) => void;
+  /** Called when a notable run tag is resolved. */
+  onRunTag?: (tag: string) => void;
+  /** Called when non-fatal warnings are collected. */
+  onWarning?: (warnings: string[]) => void;
+  /** Whether warnings should surface as transient UI notifications. */
+  notifyWarnings?: boolean;
 }
 
 export interface RunResult {
@@ -166,6 +173,8 @@ export interface RunResult {
   aborted: boolean;
   /** True if the agent was steered to wrap up (hit soft turn limit) but finished in time. */
   steered: boolean;
+  /** Non-fatal warnings produced while preparing or running the agent. */
+  warnings: string[];
 }
 
 /**
@@ -217,6 +226,12 @@ function forwardAbortSignal(
   const onAbort = () => session.abort();
   signal.addEventListener("abort", onAbort, { once: true });
   return () => signal.removeEventListener("abort", onAbort);
+}
+
+function notifyWarning(ctx: ExtensionContext, message: string): void {
+  if (ctx.hasUI) {
+    ctx.ui.notify(message, "warning");
+  }
 }
 
 function createParentBridgeTools(
@@ -380,13 +395,40 @@ export async function runAgent(
     }
   }
 
-  const systemPrompt = buildAgentPrompt(
+  let systemPrompt = buildAgentPrompt(
     agentConfig,
     effectiveCwd,
     env,
     parentSystemPrompt,
     extras
   );
+
+  const warnings: string[] = [];
+  const shouldNotifyWarnings = options.notifyWarnings !== false;
+  const addWarning = (warning: string) => {
+    warnings.push(warning);
+    options.onWarning?.([...warnings]);
+    if (shouldNotifyWarnings) {
+      notifyWarning(ctx, warning);
+    }
+  };
+
+  for (const warning of agentConfig.frontmatterWarnings ?? []) {
+    addWarning(warning);
+  }
+
+  if (agentConfig.caveman !== undefined) {
+    const caveman = await applyCavemanRpc(
+      options.pi.events,
+      systemPrompt,
+      agentConfig.caveman
+    );
+    systemPrompt = caveman.systemPrompt;
+    options.onRunTag?.(caveman.tag);
+    if (caveman.warning) {
+      addWarning(caveman.warning);
+    }
+  }
 
   // When skills is string[], we've already preloaded them into the prompt.
   // Still pass noSkills: true since we don't need the skill loader to load them again.
@@ -554,7 +596,13 @@ export async function runAgent(
 
   const responseText =
     collector.getText().trim() || getLastAssistantText(session);
-  return { responseText, session, aborted, steered: softLimitReached };
+  return {
+    responseText,
+    session,
+    aborted,
+    steered: softLimitReached,
+    warnings,
+  };
 }
 
 /**

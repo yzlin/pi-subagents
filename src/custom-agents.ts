@@ -59,6 +59,7 @@ function loadFromDir(
 
     const { frontmatter: fm, body } =
       parseFrontmatter<Record<string, unknown>>(content);
+    const frontmatterWarnings = parseFrontmatterWarnings(name, fm);
 
     agents.set(name, {
       name,
@@ -82,6 +83,9 @@ function loadFromDir(
       isolated: fm.isolated == null ? undefined : fm.isolated === true,
       memory: parseMemory(fm.memory),
       isolation: fm.isolation === "worktree" ? "worktree" : undefined,
+      caveman: booleanField(fm.caveman),
+      frontmatterWarnings:
+        frontmatterWarnings.length > 0 ? frontmatterWarnings : undefined,
       enabled: fm.enabled !== false, // default true; explicitly false disables
       source,
     });
@@ -91,6 +95,17 @@ function loadFromDir(
 // ---- Field parsers ----
 // All follow the same convention: omitted → default, "none"/empty → nothing, value → exact.
 
+function parseFrontmatterWarnings(
+  name: string,
+  fm: Record<string, unknown>
+): string[] {
+  if (fm.caveman == null || typeof fm.caveman === "boolean") {
+    return [];
+  }
+
+  return [`Agent "${name}" has non-boolean caveman frontmatter; ignoring it.`];
+}
+
 /** Extract a string or undefined. */
 function str(val: unknown): string | undefined {
   return typeof val === "string" ? val : undefined;
@@ -99,6 +114,11 @@ function str(val: unknown): string | undefined {
 /** Extract a non-negative integer or undefined. 0 means unlimited for max_turns. */
 function nonNegativeInt(val: unknown): number | undefined {
   return typeof val === "number" && val >= 0 ? val : undefined;
+}
+
+/** Extract a boolean or undefined. */
+function booleanField(val: unknown): boolean | undefined {
+  return typeof val === "boolean" ? val : undefined;
 }
 
 /**

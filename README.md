@@ -168,9 +168,30 @@ All fields are optional — sensible defaults for everything.
 | `run_in_background` | `false` | Run in background by default |
 | `isolation` | — | `worktree`: run in a temporary git worktree for full repo isolation |
 | `isolated` | `false` | No extension/MCP tools, only built-in |
+| `caveman` | — | Boolean only. When set, asks the caveman extension RPC to apply/remove caveman prompt text before child session creation |
 | `enabled` | `true` | Set to `false` to disable an agent without deleting its file |
 
-Frontmatter is authoritative. If an agent file sets `model`, `thinking`, `max_turns`, `inherit_context`, `run_in_background`, `isolated`, or `isolation`, those values are locked for that agent. `Agent` tool parameters only fill fields the agent config leaves unspecified.
+Frontmatter is authoritative. If an agent file sets `model`, `thinking`, `max_turns`, `inherit_context`, `run_in_background`, `isolated`, `isolation`, or `caveman`, those values are locked for that agent. `Agent` tool parameters only fill fields the agent config leaves unspecified.
+
+### Caveman frontmatter
+
+`caveman` accepts booleans only:
+
+```markdown
+---
+caveman: true
+---
+```
+
+Behavior:
+
+- `caveman: true` asks the separate caveman extension to append its canonical caveman prompt before the child session starts.
+- `caveman: false` asks caveman to strip inherited caveman prompt text.
+- The caveman extension must expose event-bus RPC v1 (`caveman:rpc:capabilities` and `caveman:rpc:apply`).
+- If RPC is unavailable, times out, or apply fails, the agent still starts with the unmodified prompt and shows a warning when UI notifications are available.
+- Non-boolean `caveman` values are treated as omitted and warn during agent startup.
+
+Agent runs are tagged for UI/status rendering: `caveman:on`, `caveman:off`, or `caveman:unavailable`.
 
 ## Tools
 
