@@ -24,10 +24,10 @@
     "autonomous"
   ],
   "dependencies": {
-    "@mariozechner/pi-ai": "^0.62.0",
-    "@mariozechner/pi-coding-agent": "^0.62.0",
-    "@mariozechner/pi-tui": "^0.62.0",
-    "@sinclair/typebox": "latest"
+    "@mariozechner/pi-ai": "^0.69.0",
+    "@mariozechner/pi-coding-agent": "^0.69.0",
+    "@mariozechner/pi-tui": "^0.69.0",
+    "typebox": "^1.1.34"
   },
   "scripts": {
     "build": "tsc",

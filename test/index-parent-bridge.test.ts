@@ -377,7 +377,7 @@ describe("index parent bridge integration", () => {
     });
   });
 
-  it("does not flush queued bridge traffic into a different session after session switch", async () => {
+  it("does not flush queued bridge traffic into a different session after session replacement", async () => {
     const setup = setupExtension();
     cleanup = setup.shutdown;
 
@@ -391,11 +391,11 @@ describe("index parent bridge integration", () => {
 
     expect(setup.pi.sendMessage).not.toHaveBeenCalled();
 
-    await setup.handlers.get("session_switch")?.({}, sessionB);
+    await setup.handlers.get("session_start")?.({ reason: "new" }, sessionB);
     expect(setup.pi.sendMessage).not.toHaveBeenCalled();
 
-    await setup.handlers.get("session_switch")?.(
-      {},
+    await setup.handlers.get("session_start")?.(
+      { reason: "resume" },
       makeCtx("session-a", true)
     );
     expect(setup.pi.sendMessage).toHaveBeenCalledTimes(1);

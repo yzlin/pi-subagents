@@ -22,7 +22,7 @@ import type {
   ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 
 import { AgentManager } from "./agent-manager.js";
 import {
@@ -763,12 +763,6 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", (_event, ctx) => {
     currentCtx = ctx;
     manager.clearCompleted(); // preserve existing behavior
-    flushQueuedParentBridgeMessages(ctx);
-  });
-
-  pi.on("session_switch", (_event, ctx) => {
-    currentCtx = ctx;
-    manager.clearCompleted();
     flushQueuedParentBridgeMessages(ctx);
   });
 
