@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+> **Heads-up — behavior change:**
+> - `isolation: "worktree"` now fails loud (returns an error) instead of silently falling back to the main tree. Affects users running pi in a non-git directory or a fresh repo with no commits.
+
 ### Added
 - **Caveman frontmatter for subagents** — agent files can now set boolean `caveman` frontmatter to ask the caveman extension RPC to apply or remove caveman prompt text before child session creation. Runs are tagged as `caveman:on`, `caveman:off`, or `caveman:unavailable` for UI/status display.
 - **Caveman RPC warning handling** — invalid `caveman` frontmatter, unavailable RPC, or apply failures are reported as non-fatal warnings; foreground runs can show warning notifications while agents continue with the unmodified prompt.
@@ -17,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Headless `pi --print` runs no longer hang or crash after background subagents complete.** Cleanup timers no longer keep the process alive, and stale completion notifications are treated as best-effort shutdown side effects.
 
 ### Changed
+- **`isolation: "worktree"` now fails loud instead of silently falling back.** Previously when `createWorktree` returned undefined (not a git repo, no commits yet, or `git worktree add` failed), the agent ran in the main `cwd` with a `[WARNING: ...]` block prepended to its prompt — visible only to the LLM, never surfaced to the caller. Now the failure throws a structured error that propagates back to the `Agent` tool response; no agent record is created. Queued background spawns whose worktree creation fails when they dequeue are marked terminal-error and don't block the rest of the queue.
 - **No embedded default agents** — the extension no longer ships `general-purpose`, `Explore`, or `Plan`. Users must define agent types in `.pi/agents/<name>.md` or `~/.pi/agent/agents/<name>.md`; unknown types now return setup guidance instead of falling back.
 
 ### Fixed

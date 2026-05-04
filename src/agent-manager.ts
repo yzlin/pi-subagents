@@ -153,7 +153,14 @@ export class AgentManager {
       return id;
     }
 
-    this.startAgent(id, record, args);
+    // startAgent can throw (e.g. strict worktree-isolation failure) — clean
+    // up the record so callers don't see an orphan in `listAgents()`.
+    try {
+      this.startAgent(id, record, args);
+    } catch (err) {
+      this.agents.delete(id);
+      throw err;
+    }
     return id;
   }
 
@@ -163,6 +170,21 @@ export class AgentManager {
     record: AgentRecord,
     { pi, ctx, type, prompt, options }: SpawnArgs
   ) {
+    // Worktree isolation: try to create a temporary git worktree. Strict —
+    // fail loud if not possible (no silent fallback to main tree). Done
+    // BEFORE state mutation so a throw doesn't leave the record half-running.
+    let worktreeCwd: string | undefined;
+    if (options.isolation === "worktree") {
+      const wt = createWorktree(ctx.cwd, id);
+      if (!wt) {
+        throw new Error(
+          'Cannot run with isolation: "worktree" — not a git repo, no commits yet, or `git worktree add` failed. ' +
+            'Initialize git and commit at least once, or omit `isolation`.'
+        );
+      }
+      record.worktree = wt;
+      worktreeCwd = wt.path;
+    }
     record.status = "running";
     record.startedAt = Date.now();
     if (options.isBackground) {
@@ -179,26 +201,7 @@ export class AgentManager {
     }
     const detach = () => { detachParentSignal?.(); detachParentSignal = undefined; };
 
-    // Worktree isolation: create a temporary git worktree if requested
-    let worktreeCwd: string | undefined;
-    let worktreeWarning = "";
-    if (options.isolation === "worktree") {
-      const wt = createWorktree(ctx.cwd, id);
-      if (wt) {
-        record.worktree = wt;
-        worktreeCwd = wt.path;
-      } else {
-        worktreeWarning =
-          "\n\n[WARNING: Worktree isolation was requested but failed (not a git repo, or no commits yet). Running in the main working directory instead.]";
-      }
-    }
-
-    // Prepend worktree warning to prompt if isolation failed
-    const effectivePrompt = worktreeWarning
-      ? `${worktreeWarning}\n\n${prompt}`
-      : prompt;
-
-    const promise = runAgent(ctx, type, effectivePrompt, {
+    const promise = runAgent(ctx, type, prompt, {
       pi,
       agentId: id,
       parentSessionId: getParentSessionId(ctx),
@@ -345,7 +348,16 @@ export class AgentManager {
       if (!record || record.status !== "queued") {
         continue;
       }
-      this.startAgent(next.id, record, next.args);
+      try {
+        this.startAgent(next.id, record, next.args);
+      } catch (err) {
+        // Late failure (e.g. strict worktree-isolation) — surface on the record
+        // so the user/agent can see it via /agents, then keep draining.
+        record.status = "error";
+        record.error = err instanceof Error ? err.message : String(err);
+        record.completedAt = Date.now();
+        this.onComplete?.(record);
+      }
     }
   }
 
