@@ -499,7 +499,11 @@ export default function (pi: ExtensionAPI) {
       key,
       setTimeout(() => {
         pendingNudges.delete(key);
-        send();
+        try {
+          send();
+        } catch {
+          /* ignore stale completion side-effect errors */
+        }
       }, delay)
     );
   }
