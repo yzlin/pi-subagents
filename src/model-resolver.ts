@@ -2,7 +2,7 @@
  * Model resolution: exact match ("provider/modelId") with fuzzy fallback.
  */
 
-import type { Api, Model } from "@mariozechner/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
 
 const QUERY_SPLIT_RE = /[\s\-/]+/;
 

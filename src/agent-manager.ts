@@ -8,12 +8,12 @@
 
 import { randomUUID } from "node:crypto";
 
-import type { Api, Model } from "@mariozechner/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type {
   AgentSession,
   ExtensionAPI,
   ExtensionContext,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
 import { parentBridge } from "./parent-bridge.js";

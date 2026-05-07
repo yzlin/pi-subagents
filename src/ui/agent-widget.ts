@@ -5,7 +5,7 @@
  * Uses the callback form of setWidget for themed rendering.
  */
 
-import { type TUI, truncateToWidth } from "@mariozechner/pi-tui";
+import { type TUI, truncateToWidth } from "@earendil-works/pi-tui";
 
 import type { AgentManager } from "../agent-manager.js";
 import { getConfig } from "../agent-types.js";

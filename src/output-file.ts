@@ -12,7 +12,7 @@ import { join } from "node:path";
 import type {
   AgentSession,
   AgentSessionEvent,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 const PATH_SEPARATOR_RE = /\//g;
 const LEADING_DASH_RE = /^-/;

@@ -2,7 +2,7 @@
  * context.ts — Extract parent conversation context for subagent inheritance.
  */
 
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 interface TextContentBlock {
   type: "text";

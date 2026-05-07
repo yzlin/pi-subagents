@@ -2,10 +2,10 @@
  * types.ts — Type definitions for the subagent system.
  */
 
-import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
-import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 
-export type { ThinkingLevel } from "@mariozechner/pi-agent-core";
+export type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 
 /** Agent type: any user-defined string name. */
 export type SubagentType = string;

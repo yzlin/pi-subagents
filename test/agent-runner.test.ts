@@ -7,7 +7,7 @@ const { createAgentSession, settingsManagerCreate, resourceLoaderOptions } =
     resourceLoaderOptions: [] as Record<string, unknown>[],
   }));
 
-vi.mock("@mariozechner/pi-coding-agent", () => ({
+vi.mock("@earendil-works/pi-coding-agent", () => ({
   createAgentSession,
   DefaultResourceLoader: class {
     constructor(options: Record<string, unknown>) {
