@@ -132,6 +132,112 @@ describe("cross-extension RPC", () => {
       );
     });
 
+    const resolvedModel = {
+      id: "gpt-5.5",
+      name: "GPT 5.5",
+      provider: "openai-codex",
+    };
+
+    function createModelRegistry() {
+      return {
+        find(provider: string, modelId: string) {
+          if (
+            provider === resolvedModel.provider &&
+            modelId === resolvedModel.id
+          ) {
+            return resolvedModel;
+          }
+          return undefined;
+        },
+        getAll() {
+          return [resolvedModel];
+        },
+        getAvailable() {
+          return [resolvedModel];
+        },
+      };
+    }
+
+    function createEmptyModelRegistry() {
+      return {
+        find() {
+          return undefined;
+        },
+        getAll() {
+          return [];
+        },
+        getAvailable() {
+          return [];
+        },
+      };
+    }
+
+    it("resolves provider-prefixed model options before spawning", async () => {
+      ctx = { modelRegistry: createModelRegistry() };
+      registerRpcHandlers(deps);
+      const reply = vi.fn();
+      events.on("subagents:rpc:spawn:reply:req-s-model", reply);
+      events.emit("subagents:rpc:spawn", {
+        requestId: "req-s-model",
+        type: "general-purpose",
+        prompt: "x",
+        options: { model: "openai-codex/gpt-5.5" },
+      });
+
+      await vi.waitFor(() => expect(reply).toHaveBeenCalled());
+      expect(reply).toHaveBeenCalledWith({
+        success: true,
+        data: { id: "agent-42" },
+      });
+      expect(manager.spawn).toHaveBeenCalledWith(
+        deps.pi,
+        ctx,
+        "general-purpose",
+        "x",
+        { model: resolvedModel }
+      );
+    });
+
+    it("returns a clear error when an RPC model option cannot be resolved", async () => {
+      ctx = { modelRegistry: createEmptyModelRegistry() };
+      registerRpcHandlers(deps);
+      const reply = vi.fn();
+      events.on("subagents:rpc:spawn:reply:req-s-bad-model", reply);
+      events.emit("subagents:rpc:spawn", {
+        requestId: "req-s-bad-model",
+        type: "general-purpose",
+        prompt: "x",
+        options: { model: "missing/model" },
+      });
+
+      await vi.waitFor(() => expect(reply).toHaveBeenCalled());
+      expect(reply).toHaveBeenCalledWith({
+        success: false,
+        error: 'Model not found: "missing/model".\n\nAvailable models:\n',
+      });
+      expect(manager.spawn).not.toHaveBeenCalled();
+    });
+
+    it("rejects blank RPC model options", async () => {
+      ctx = { modelRegistry: createEmptyModelRegistry() };
+      registerRpcHandlers(deps);
+      const reply = vi.fn();
+      events.on("subagents:rpc:spawn:reply:req-s-blank-model", reply);
+      events.emit("subagents:rpc:spawn", {
+        requestId: "req-s-blank-model",
+        type: "general-purpose",
+        prompt: "x",
+        options: { model: "  " },
+      });
+
+      await vi.waitFor(() => expect(reply).toHaveBeenCalled());
+      expect(reply).toHaveBeenCalledWith({
+        success: false,
+        error: "Model override cannot be blank",
+      });
+      expect(manager.spawn).not.toHaveBeenCalled();
+    });
+
     it("returns error when no active session", async () => {
       ctx = undefined;
       registerRpcHandlers(deps);

@@ -9,6 +9,8 @@
  *   error   → { success: false, error: string }
  */
 
+import { type ModelRegistry, resolveModel } from "./model-resolver.js";
+
 /** Minimal event bus interface needed by the RPC handlers. */
 export interface EventBus {
   on(event: string, handler: (data: unknown) => void): () => void;
@@ -24,6 +26,9 @@ export type RpcReply<T = void> =
 export const PROTOCOL_VERSION = 2;
 
 type SpawnRpcOptions = Record<string, unknown>;
+interface RpcContext {
+  modelRegistry?: ModelRegistry;
+}
 
 /** Minimal AgentManager interface needed by the spawn/stop RPCs. */
 export interface SpawnCapable {
@@ -77,6 +82,34 @@ function handleRpc<P extends { requestId: string }>(
   });
 }
 
+function resolveSpawnOptions(
+  ctx: unknown,
+  options: SpawnRpcOptions | undefined
+): SpawnRpcOptions {
+  if (typeof options?.model !== "string") {
+    return options ?? {};
+  }
+
+  const registry = (ctx as RpcContext).modelRegistry;
+  if (!registry) {
+    throw new Error(
+      "Cannot resolve model override: no model registry available"
+    );
+  }
+
+  const requestedModel = options.model.trim();
+  if (!requestedModel) {
+    throw new Error("Model override cannot be blank");
+  }
+
+  const resolvedModel = resolveModel(requestedModel, registry);
+  if (typeof resolvedModel === "string") {
+    throw new Error(resolvedModel);
+  }
+
+  return { ...options, model: resolvedModel };
+}
+
 /**
  * Register ping, spawn, and stop RPC handlers on the event bus.
  * Returns unsub functions for cleanup.
@@ -98,7 +131,8 @@ export function registerRpcHandlers(deps: RpcDeps): RpcHandle {
     if (!ctx) {
       throw new Error("No active session");
     }
-    return { id: manager.spawn(pi, ctx, type, prompt, options ?? {}) };
+    const spawnOptions = resolveSpawnOptions(ctx, options);
+    return { id: manager.spawn(pi, ctx, type, prompt, spawnOptions) };
   });
 
   const unsubStop = handleRpc<{ requestId: string; agentId: string }>(

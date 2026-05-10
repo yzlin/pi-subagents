@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **No embedded default agents** — the extension no longer ships `general-purpose`, `Explore`, or `Plan`. Users must define agent types in `.pi/agents/<name>.md` or `~/.pi/agent/agents/<name>.md`; unknown types now return setup guidance instead of falling back.
 
 ### Fixed
+- **RPC spawn model overrides** — cross-extension `subagents:rpc:spawn` now resolves string `model` overrides through the active session's model registry before spawning. Blank or unknown models now return clear RPC errors instead of passing unresolved strings into agent creation.
 - **pi 0.68.x SDK compatibility** — subagent sessions now pass an explicit cwd into `SettingsManager.create()` and register subagent bridge tools via `customTools` while using the pi 0.68+ string-name tool allowlist contract. This fixes runtime breakage when loading the extension under newer host pi versions.
 
 ## [0.6.0] - 2026-04-13
