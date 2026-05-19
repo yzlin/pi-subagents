@@ -14,6 +14,10 @@ import type {
   AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
 
+const PATH_SEPARATOR_RE = /[/\\]/g;
+const WINDOWS_DRIVE_PREFIX_RE = /^[A-Za-z]:-/;
+const LEADING_DASHES_RE = /^-+/;
+
 function getOutputEntryType(role: string): "assistant" | "user" | "toolResult" {
   if (role === "assistant") {
     return "assistant";
@@ -32,9 +36,9 @@ function getOutputEntryType(role: string): "assistant" | "user" | "toolResult" {
  */
 export function encodeCwd(cwd: string): string {
   return cwd
-    .replace(/[/\\]/g, "-")        // both separators → dash
-    .replace(/^[A-Za-z]:-/, "")    // strip Windows drive prefix ("C:-")
-    .replace(/^-+/, "");           // strip leading dashes (POSIX root, UNC)
+    .replace(PATH_SEPARATOR_RE, "-") // both separators → dash
+    .replace(WINDOWS_DRIVE_PREFIX_RE, "") // strip Windows drive prefix ("C:-")
+    .replace(LEADING_DASHES_RE, ""); // strip leading dashes (POSIX root, UNC)
 }
 
 /** Create the output file path, ensuring the directory exists.
@@ -52,7 +56,9 @@ export function createOutputFilePath(
   try {
     chmodSync(root, 0o700);
   } catch (err) {
-    if (process.platform !== "win32") throw err;
+    if (process.platform !== "win32") {
+      throw err;
+    }
   }
   const dir = join(root, encoded, sessionId, "tasks");
   mkdirSync(dir, { recursive: true });

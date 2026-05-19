@@ -23,6 +23,7 @@ import type {
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+
 import { AgentManager } from "./agent-manager.js";
 import {
   getAgentConversation,

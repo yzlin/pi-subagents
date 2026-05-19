@@ -507,15 +507,17 @@ describe("agent-runner final output capture", () => {
 
     // noContextFiles skips AGENTS.md/CLAUDE.md at the loader source;
     // appendSystemPromptOverride suppresses APPEND_SYSTEM.md (no flag equivalent).
-    expect(defaultResourceLoaderCtor).toHaveBeenCalledWith(
+    expect(resourceLoaderOptions.at(-1)).toEqual(
       expect.objectContaining({
         noContextFiles: true,
         appendSystemPromptOverride: expect.any(Function),
-      }),
+      })
     );
     // The override returns an empty list so any loaded sources are discarded.
-    const ctorArgs = defaultResourceLoaderCtor.mock.calls[0][0];
-    expect(ctorArgs.appendSystemPromptOverride(["would-be-loaded"])).toEqual([]);
+    const ctorArgs = resourceLoaderOptions.at(-1)!;
+    expect(ctorArgs.appendSystemPromptOverride(["would-be-loaded"])).toEqual(
+      []
+    );
   });
 
   it("resumeAgent also falls back to the final assistant message text", async () => {

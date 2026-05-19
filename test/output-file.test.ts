@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+
 import { encodeCwd } from "../src/output-file.js";
 
 describe("encodeCwd", () => {
@@ -23,7 +24,9 @@ describe("encodeCwd", () => {
   });
 
   it("preserves server and share for UNC paths", () => {
-    expect(encodeCwd("\\\\server\\share\\project")).toBe("server-share-project");
+    expect(encodeCwd("\\\\server\\share\\project")).toBe(
+      "server-share-project"
+    );
   });
 
   it("handles mixed separators", () => {

@@ -179,7 +179,7 @@ export class AgentManager {
       if (!wt) {
         throw new Error(
           'Cannot run with isolation: "worktree" — not a git repo, no commits yet, or `git worktree add` failed. ' +
-            'Initialize git and commit at least once, or omit `isolation`.'
+            "Initialize git and commit at least once, or omit `isolation`."
         );
       }
       record.worktree = wt;
@@ -197,9 +197,13 @@ export class AgentManager {
     if (options.signal) {
       const onParentAbort = () => this.abort(id);
       options.signal.addEventListener("abort", onParentAbort, { once: true });
-      detachParentSignal = () => options.signal!.removeEventListener("abort", onParentAbort);
+      detachParentSignal = () =>
+        options.signal!.removeEventListener("abort", onParentAbort);
     }
-    const detach = () => { detachParentSignal?.(); detachParentSignal = undefined; };
+    const detach = () => {
+      detachParentSignal?.();
+      detachParentSignal = undefined;
+    };
 
     const promise = runAgent(ctx, type, prompt, {
       pi,
@@ -286,7 +290,11 @@ export class AgentManager {
 
         if (options.isBackground) {
           this.runningBackground--;
-          try { this.onComplete?.(record); } catch { /* ignore completion side-effect errors */ }
+          try {
+            this.onComplete?.(record);
+          } catch {
+            /* ignore completion side-effect errors */
+          }
           this.drainQueue();
         }
         return responseText;

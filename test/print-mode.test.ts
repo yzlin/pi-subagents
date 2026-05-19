@@ -1,7 +1,13 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/agent-runner.js", async () => {
-  const actual = await vi.importActual<typeof import("../src/agent-runner.js")>("../src/agent-runner.js");
+  const actual = await vi.importActual<typeof import("../src/agent-runner.js")>(
+    "../src/agent-runner.js"
+  );
   return {
     ...actual,
     runAgent: vi.fn(),
@@ -43,14 +49,14 @@ function makePi() {
   };
 }
 
-function makeHeadlessCtx() {
+function makeHeadlessCtx(cwd = "/tmp") {
   return {
     hasUI: false,
     ui: {
       setStatus: vi.fn(),
       setWidget: vi.fn(),
     },
-    cwd: "/tmp",
+    cwd,
     model: undefined,
     modelRegistry: {
       find: vi.fn(),
@@ -65,9 +71,14 @@ function makeHeadlessCtx() {
 }
 
 describe("print mode background notifications", () => {
+  const tempDirs: string[] = [];
+
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { force: true, recursive: true });
+    }
   });
 
   it("ignores stale-context errors from delayed completion nudges", async () => {
@@ -77,6 +88,18 @@ describe("print mode background notifications", () => {
       aborted: false,
       steered: false,
     });
+
+    const cwd = mkdtempSync(join(tmpdir(), "pi-subagents-print-"));
+    tempDirs.push(cwd);
+    const agentsDir = join(cwd, ".pi", "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(
+      join(agentsDir, "general-purpose.md"),
+      "---\ndescription: General test agent\ntools: none\n---\n\nYou are a test agent.\n",
+      "utf-8"
+    );
+
+    vi.spyOn(process, "cwd").mockReturnValue(cwd);
 
     const { pi, tools, handlers } = makePi();
     subagentsExtension(pi);
@@ -93,7 +116,7 @@ describe("print mode background notifications", () => {
       },
       undefined,
       undefined,
-      makeHeadlessCtx(),
+      makeHeadlessCtx(cwd)
     );
 
     await vi.advanceTimersByTimeAsync(100); // smart-join batch debounce
@@ -101,6 +124,6 @@ describe("print mode background notifications", () => {
 
     expect(pi.sendMessage).toHaveBeenCalled();
 
-    await handlers.get("session_shutdown")?.({}, makeHeadlessCtx());
+    await handlers.get("session_shutdown")?.({}, makeHeadlessCtx(cwd));
   });
 });

@@ -16,6 +16,8 @@ vi.mock("../src/worktree.js", () => ({
 
 import { runAgent } from "../src/agent-runner.js";
 
+const WORKTREE_ISOLATION_RE = /isolation: "worktree"/;
+
 const mockPi = {} as any;
 const mockCtx = { cwd: "/tmp" } as any;
 
@@ -300,7 +302,7 @@ describe("AgentManager — isolation: worktree fails loud, no silent fallback", 
         description: "test",
         isolation: "worktree",
       })
-    ).toThrow(/isolation: "worktree"/);
+    ).toThrow(WORKTREE_ISOLATION_RE);
 
     // Cleaned up — no orphan in listAgents().
     expect(manager.listAgents()).toEqual([]);

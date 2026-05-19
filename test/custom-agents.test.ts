@@ -591,7 +591,7 @@ Bad isolation.`
       mkdirSync(globalAgentsDir, { recursive: true });
       writeFileSync(
         join(globalAgentsDir, "via-env.md"),
-        "---\ndescription: Discovered via env var\n---\n\nTest body.",
+        "---\ndescription: Discovered via env var\n---\n\nTest body."
       );
 
       const result = loadCustomAgents(tmpDir);
@@ -600,8 +600,11 @@ Bad isolation.`
       expect(result.has("via-env")).toBe(true);
       expect(result.get("via-env")!.description).toBe("Discovered via env var");
     } finally {
-      if (originalEnv == null) delete process.env.PI_CODING_AGENT_DIR;
-      else process.env.PI_CODING_AGENT_DIR = originalEnv;
+      if (originalEnv == null) {
+        delete process.env.PI_CODING_AGENT_DIR;
+      } else {
+        process.env.PI_CODING_AGENT_DIR = originalEnv;
+      }
       rmSync(altAgentDir, { recursive: true, force: true });
     }
   });
