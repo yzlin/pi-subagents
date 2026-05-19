@@ -497,4 +497,61 @@ src/
 
 MIT.
 
+## Release process
+
+Release automation assumes the default branch is `main` and runs on Node 24.
+
+### One-time setup
+
+1. Bootstrap the current package version locally before the first automated release. The changelog bootstrap is a dry run by default and only writes `CHANGELOG.md` when `-- --yes` is passed:
+
+   ```bash
+   npm ci
+   npm run build
+   npm run release:bootstrap:0.6.0
+   npm run release:bootstrap:0.6.0 -- --yes
+   npm run release:gate
+   npm publish --provenance --access public --tag latest
+   git tag -a v0.6.0 -m v0.6.0
+   git push origin v0.6.0
+   gh release create v0.6.0 --title v0.6.0 --notes-file <(awk '/^## \[0.6.0\]/{flag=1; next} /^## \[/{flag=0} flag' CHANGELOG.md)
+   ```
+
+   This folds the current `[Unreleased]` notes into `[0.6.0]`, publishes `0.6.0` once, creates and pushes the annotated `v0.6.0` tag, and creates the matching GitHub Release from the folded changelog section.
+
+2. Rename the default branch from `master` to `main` before using release workflows. After the remote rename, refresh the local clone:
+
+   ```bash
+   git branch -m master main
+   git fetch origin
+   git branch --set-upstream-to=origin/main main
+   ```
+
+3. If this fork tracks the original repository as `upstream`, fetch it without tags and remove any local upstream tags that should not belong to this package:
+
+   ```bash
+   git fetch --no-tags upstream
+   git tag -l | xargs -n1 git tag -d
+   git fetch --tags origin
+   ```
+
+4. In npm, configure this repository as a trusted publisher for `@yzlin/pi-subagents`. The publish workflow uses GitHub OIDC provenance (`npm publish --provenance`) and does not require an `NPM_TOKEN`.
+
+5. In GitHub, create a protected environment named `npm-publish`. Require approval if you want a manual gate before release preparation commits, tags, pushes, and dispatches publishing.
+
+### Future releases
+
+1. Run **Prepare release** (`.github/workflows/release-prepare.yml`) from `main`. Optional `bump` input accepts `major`, `minor`, or `patch`; otherwise the script infers the bump from `CHANGELOG.md`.
+2. The workflow runs `npm run release:gate`, then `npm run release:prepare -- --yes`. That updates `package.json`, `package-lock.json`, and `CHANGELOG.md`, commits `chore: release vX.Y.Z`, creates `vX.Y.Z`, atomically pushes `main` and the tag, then dispatches `npm-publish.yml`.
+3. **Publish npm package** runs only on `refs/tags/v*`. It runs `npm run release:publish -- --yes`, validates the tag matches `package.json`, publishes with OIDC provenance if the version is not already on npm, and creates or updates the GitHub Release from the changelog section.
+
+Dry-run locally before trusting a release:
+
+```bash
+npm run release:prepare
+npm run release:publish
+```
+
+Dry runs print mutating commands instead of running them. Only pass `-- --yes` when you intend to commit, tag, push, dispatch, publish, or edit a GitHub Release.
+
 Fork attribution: original package by [tintinweb](https://github.com/tintinweb).

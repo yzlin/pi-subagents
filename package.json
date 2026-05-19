@@ -7,6 +7,25 @@
     "tintinweb (original author)"
   ],
   "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/yzlin/pi-subagents.git"
@@ -23,15 +42,16 @@
     "agent",
     "autonomous"
   ],
-  "dependencies": {
-    "@earendil-works/pi-ai": "^0.74.0",
-    "@earendil-works/pi-coding-agent": "^0.74.0",
-    "@earendil-works/pi-tui": "^0.74.0",
-    "typebox": "^1.1.34"
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
   },
   "scripts": {
-    "build": "tsc",
-    "prepublishOnly": "npm run lint && npm run typecheck && npm run test && npm run build",
+    "build": "rm -rf dist && tsc",
+    "prepublishOnly": "npm run release:gate",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
@@ -40,21 +60,32 @@
     "format": "biome format --write src/ test/",
     "lint": "biome check src/ test/",
     "lint:fix": "biome check --fix src/ test/",
+    "smoke:extension-load": "node scripts/extension-load-smoke.mjs",
+    "validate:package": "node scripts/validate-package.mjs",
+    "release:gate": "npm run lint && npm run typecheck && npm run test && npm run build && npm run smoke:extension-load && npm run validate:package",
+    "release:bootstrap:0.6.0": "node scripts/bootstrap-0.6.0-changelog.mjs",
+    "release:prepare": "node scripts/release-prepare.mjs",
+    "release:publish": "node scripts/release-publish.mjs",
     "prepare": "husky"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.12",
+    "@earendil-works/pi-agent-core": "^0.74.0",
+    "@earendil-works/pi-ai": "^0.74.0",
+    "@earendil-works/pi-coding-agent": "^0.74.0",
+    "@earendil-works/pi-tui": "^0.74.0",
     "@types/node": "^25.5.0",
     "husky": "^9.1.7",
+    "typebox": "^1.1.34",
     "typescript": "^5.0.0",
     "ultracite": "^7.5.9",
     "vitest": "^4.0.18"
   },
   "pi": {
     "extensions": [
-      "./src/index.ts"
+      "./dist/index.js"
     ],
-    "video": "https://github.com/yzlin/pi-subagents/raw/master/media/demo.mp4",
-    "image": "https://github.com/yzlin/pi-subagents/raw/master/media/screenshot.png"
+    "video": "https://github.com/yzlin/pi-subagents/raw/main/media/demo.mp4",
+    "image": "https://github.com/yzlin/pi-subagents/raw/main/media/screenshot.png"
   }
 }
