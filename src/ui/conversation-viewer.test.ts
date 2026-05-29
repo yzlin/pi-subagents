@@ -27,7 +27,14 @@ vi.mock("@earendil-works/pi-tui", async (importOriginal) => {
 // Must import AFTER vi.mock declaration (vitest hoists vi.mock but the
 // dynamic import of the test subject must happen after)
 const { visibleWidth } = await import("@earendil-works/pi-tui");
-const { ConversationViewer } = await import("./conversation-viewer.js");
+const { initTheme } = await import("@earendil-works/pi-coding-agent");
+initTheme(undefined, false);
+const {
+  calculateViewerScrollbarThumb,
+  ConversationViewer,
+  decorateViewerScrollbar,
+} = await import("./conversation-viewer.js");
+const { SubagentModeViewer } = await import("./subagent-mode-viewer.js");
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -83,9 +90,187 @@ beforeEach(() => {
 });
 
 describe("ConversationViewer", () => {
+  describe("viewer scrollbar", () => {
+    it("matches the pieditor thumb sizing and top-origin position", () => {
+      expect(
+        calculateViewerScrollbarThumb({
+          totalLines: 100,
+          viewportRows: 10,
+          scrollOffset: 0,
+        })
+      ).toEqual({ start: 0, size: 1 });
+      expect(
+        calculateViewerScrollbarThumb({
+          totalLines: 100,
+          viewportRows: 10,
+          scrollOffset: 90,
+        })
+      ).toEqual({ start: 9, size: 1 });
+      expect(
+        calculateViewerScrollbarThumb({
+          totalLines: 3,
+          viewportRows: 10,
+          scrollOffset: 0,
+        })
+      ).toBeNull();
+    });
+
+    it("decorates every viewport row with a one-cell scrollbar", () => {
+      const lines = decorateViewerScrollbar(
+        ["alpha", "beta", "gamma"],
+        { totalLines: 10, viewportRows: 3, scrollOffset: 0 },
+        8
+      );
+
+      assertAllLinesFit(lines, 8);
+      expect(lines).toHaveLength(3);
+      expect(lines[0]).toContain("\x1b[97m█\x1b[0m");
+      expect(lines[1]).toContain("\x1b[2;90m█\x1b[0m");
+      expect(lines[2]).toContain("\x1b[2;90m█\x1b[0m");
+    });
+
+    it("renders the scrollbar in the conversation content viewport", () => {
+      const viewer = new ConversationViewer(
+        mockTui(10, 80),
+        mockSession([
+          {
+            role: "user",
+            content: Array.from(
+              { length: 12 },
+              (_unused, index) => `Line ${index + 1}`
+            ).join("\n"),
+          },
+        ]),
+        mockRecord({ status: "running" }),
+        undefined,
+        ansiTheme(),
+        vi.fn()
+      );
+
+      const lines = viewer.render(80);
+
+      assertAllLinesFit(lines, 80);
+      expect(lines.join("\n")).toContain("\x1b[97m█\x1b[0m");
+      expect(lines.join("\n")).toContain("\x1b[2;90m█\x1b[0m");
+    });
+  });
+
+  describe("scroll performance", () => {
+    const MOUSE_WHEEL_UP = "\x1b[<64;10;5M";
+
+    it("does not rebuild conversation content on scroll input after render", () => {
+      const viewer = new ConversationViewer(
+        mockTui(30, 120),
+        mockSession([
+          {
+            role: "user",
+            content: Array.from(
+              { length: 200 },
+              (_unused, index) => `Long line ${index} ${"x".repeat(400)}`
+            ).join("\n"),
+          },
+        ]),
+        mockRecord({ status: "running" }),
+        undefined,
+        ansiTheme(),
+        vi.fn()
+      );
+      viewer.render(120);
+      const privateViewer = viewer as any;
+      const buildSpy = vi.spyOn(privateViewer, "buildContentLines");
+
+      viewer.handleInput(MOUSE_WHEEL_UP);
+      viewer.render(120);
+
+      expect(buildSpy).not.toHaveBeenCalled();
+    });
+
+    it("does not rebuild selected subagent content on scroll input after render", () => {
+      const session = mockSession([
+        {
+          role: "user",
+          content: Array.from(
+            { length: 200 },
+            (_unused, index) => `Long line ${index} ${"x".repeat(400)}`
+          ).join("\n"),
+        },
+      ]);
+      const agent = mockRecord({ id: "agent-1", session });
+      const viewer = new SubagentModeViewer(
+        mockTui(30, 120),
+        () => [agent],
+        () => undefined,
+        ansiTheme(),
+        vi.fn()
+      );
+      viewer.render(120);
+      const privateViewer = viewer as any;
+      const buildSpy = vi.spyOn(privateViewer, "buildContentLines");
+
+      viewer.handleInput(MOUSE_WHEEL_UP);
+      viewer.render(120);
+
+      expect(buildSpy).not.toHaveBeenCalled();
+    });
+
+    it("rebuilds conversation content after a session update", () => {
+      let onUpdate: (() => void) | undefined;
+      const session = mockSession([{ role: "user", content: "before" }]);
+      session.subscribe = vi.fn((listener) => {
+        onUpdate = listener;
+        return vi.fn();
+      });
+      const viewer = new ConversationViewer(
+        mockTui(30, 120),
+        session,
+        mockRecord({ status: "running" }),
+        undefined,
+        ansiTheme(),
+        vi.fn()
+      );
+      viewer.render(120);
+      session.messages.push({ role: "user", content: "after" } as any);
+      onUpdate?.();
+      const privateViewer = viewer as any;
+      const buildSpy = vi.spyOn(privateViewer, "buildContentLines");
+
+      viewer.render(120);
+
+      expect(buildSpy).toHaveBeenCalledOnce();
+    });
+
+    it("rebuilds selected subagent content after a session update", () => {
+      let onUpdate: (() => void) | undefined;
+      const session = mockSession([{ role: "user", content: "before" }]);
+      session.subscribe = vi.fn((listener) => {
+        onUpdate = listener;
+        return vi.fn();
+      });
+      const agent = mockRecord({ id: "agent-1", session });
+      const viewer = new SubagentModeViewer(
+        mockTui(30, 120),
+        () => [agent],
+        () => undefined,
+        ansiTheme(),
+        vi.fn()
+      );
+      viewer.render(120);
+      session.messages.push({ role: "user", content: "after" } as any);
+      onUpdate?.();
+      const privateViewer = viewer as any;
+      const buildSpy = vi.spyOn(privateViewer, "buildContentLines");
+
+      viewer.render(120);
+
+      expect(buildSpy).toHaveBeenCalledOnce();
+    });
+  });
+
   describe("input aliases", () => {
     const INPUT_CTRL_B = "\u0002";
     const INPUT_CTRL_F = "\u0006";
+    const MOUSE_WHEEL_UP = "\x1b[<64;10;5M";
+    const MOUSE_WHEEL_DOWN = "\x1b[<65;10;5M";
     const INNER_WIDTH = 76;
     const VIEWPORT_HEIGHT = 4;
 
@@ -96,13 +281,7 @@ describe("ConversationViewer", () => {
       ).join("\n");
       const viewer = new ConversationViewer(
         mockTui(rows, width),
-        mockSession([
-          {
-            role: "toolResult",
-            toolUseId: "t1",
-            content: [{ type: "text", text: content }],
-          },
-        ]),
+        mockSession([{ role: "user", content }]),
         mockRecord({ status: "running" }),
         undefined,
         ansiTheme(),
@@ -152,6 +331,33 @@ describe("ConversationViewer", () => {
         Math.min(maxScroll, VIEWPORT_HEIGHT)
       );
       expect(privateViewer.autoScroll).toBe(false);
+    });
+
+    it("maps mouse wheel up to scroll up", () => {
+      const { maxScroll, privateViewer } = getScrollableState(
+        createScrollableViewer()
+      );
+
+      expect(privateViewer.scrollOffset).toBe(maxScroll);
+
+      privateViewer.handleInput(MOUSE_WHEEL_UP);
+
+      expect(privateViewer.scrollOffset).toBe(Math.max(0, maxScroll - 1));
+      expect(privateViewer.autoScroll).toBe(maxScroll <= 1);
+    });
+
+    it("maps mouse wheel down to scroll down", () => {
+      const { maxScroll, privateViewer } = getScrollableState(
+        createScrollableViewer()
+      );
+
+      privateViewer.scrollOffset = 0;
+      privateViewer.autoScroll = false;
+
+      privateViewer.handleInput(MOUSE_WHEEL_DOWN);
+
+      expect(privateViewer.scrollOffset).toBe(Math.min(maxScroll, 1));
+      expect(privateViewer.autoScroll).toBe(maxScroll <= 1);
     });
   });
 
@@ -314,6 +520,32 @@ describe("ConversationViewer", () => {
         );
         assertAllLinesFit(viewer.render(w), w);
       }
+    });
+
+    it("shows a full-output hint for pre-truncated bashExecution messages", () => {
+      const viewer = new ConversationViewer(
+        mockTui(30, 120),
+        mockSession([
+          {
+            role: "bashExecution",
+            command: "cat big.log",
+            output: "partial output",
+            exitCode: 0,
+            cancelled: false,
+            truncated: true,
+            fullOutputPath: "/tmp/pi-big.log",
+            timestamp: Date.now(),
+          },
+        ]),
+        mockRecord(),
+        undefined,
+        ansiTheme(),
+        vi.fn()
+      );
+
+      expect(viewer.render(120).join("\n")).toContain(
+        "Output truncated. Full output: /tmp/pi-big.log"
+      );
     });
 
     it("no line exceeds width with tabbed ANSI bash output", () => {

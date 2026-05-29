@@ -5,17 +5,25 @@
  * Subscribes to session events for real-time streaming updates.
  */
 
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import {
+  type AgentSession,
+  AssistantMessageComponent,
+  BashExecutionComponent,
+  getMarkdownTheme,
+  parseSkillBlock,
+  SkillInvocationMessageComponent,
+  ToolExecutionComponent,
+  type TruncationResult,
+  UserMessageComponent,
+} from "@earendil-works/pi-coding-agent";
 import {
   type Component,
   matchesKey,
   type TUI,
   truncateToWidth,
   visibleWidth,
-  wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 
-import { extractText } from "../context.js";
 import type { AgentRecord } from "../types.js";
 import type { Theme } from "./agent-widget.js";
 import {
@@ -26,11 +34,16 @@ import {
   getDisplayName,
   getPromptModeLabel,
 } from "./agent-widget.js";
+import { getMouseWheelDirection, retainMouseWheelReporting } from "./mouse.js";
 
 /** Lines consumed by chrome: top border + header + header sep + footer sep + footer + bottom border. */
 const CHROME_LINES = 6;
 const MIN_VIEWPORT = 3;
 const TAB_STOP = 8;
+const VIEWER_SCROLLBAR_WIDTH = 1;
+const VIEWER_SCROLLBAR_GLYPH = "█";
+const VIEWER_SCROLLBAR_TRACK = `\x1b[2;90m${VIEWER_SCROLLBAR_GLYPH}\x1b[0m`;
+const VIEWER_SCROLLBAR_THUMB = `\x1b[97m${VIEWER_SCROLLBAR_GLYPH}\x1b[0m`;
 const ANSI_TERMINATOR_RE = /[A-Za-z]/;
 const GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, {
   granularity: "grapheme",
@@ -117,27 +130,118 @@ function expandTabsForDisplay(line: string): string {
   return result;
 }
 
-function normalizeDisplayText(text: string): string {
-  if (!text.includes("\t")) {
-    return text;
-  }
-  return text.split("\n").map(expandTabsForDisplay).join("\n");
+function nonNegativeInteger(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
 }
 
-interface ToolCallContentBlock {
-  type: "toolCall";
-  name?: string;
-  toolName?: string;
+export interface ViewerScrollbarState {
+  totalLines: number;
+  viewportRows: number;
+  scrollOffset: number;
+}
+
+export interface ViewerScrollbarThumb {
+  start: number;
+  size: number;
+}
+
+export function getViewerScrollbarContentWidth(width: number): number {
+  return Math.max(1, Math.trunc(width) - VIEWER_SCROLLBAR_WIDTH);
+}
+
+export function calculateViewerScrollbarThumb(
+  state: ViewerScrollbarState
+): ViewerScrollbarThumb | null {
+  const totalLines = nonNegativeInteger(state.totalLines);
+  const viewportRows = Math.max(1, nonNegativeInteger(state.viewportRows));
+  if (totalLines <= viewportRows) {
+    return null;
+  }
+
+  const maxScrollOffset = totalLines - viewportRows;
+  const scrollOffset = Math.max(
+    0,
+    Math.min(nonNegativeInteger(state.scrollOffset), maxScrollOffset)
+  );
+  const size = Math.max(
+    1,
+    Math.min(
+      viewportRows,
+      Math.floor((viewportRows * viewportRows) / totalLines)
+    )
+  );
+  const travel = viewportRows - size;
+  const start = Math.round((scrollOffset / maxScrollOffset) * travel);
+
+  return { start, size };
+}
+
+function fitViewerLineToContentWidth(
+  line: string,
+  contentWidth: number
+): string {
+  if (contentWidth <= 0) {
+    return "";
+  }
+
+  const fitted =
+    visibleWidth(line) > contentWidth
+      ? truncateToWidth(line, contentWidth, "", true)
+      : line;
+  return `${fitted}${" ".repeat(
+    Math.max(0, contentWidth - visibleWidth(fitted))
+  )}`;
+}
+
+export function decorateViewerScrollbar(
+  lines: readonly string[],
+  state: ViewerScrollbarState,
+  width: number
+): string[] {
+  const renderWidth = Math.max(1, Math.trunc(width));
+  const contentWidth = Math.max(0, renderWidth - VIEWER_SCROLLBAR_WIDTH);
+  const thumb = calculateViewerScrollbarThumb(state);
+
+  return lines.map((line, index) => {
+    const scrollbar =
+      thumb && index >= thumb.start && index < thumb.start + thumb.size
+        ? VIEWER_SCROLLBAR_THUMB
+        : VIEWER_SCROLLBAR_TRACK;
+    return `${fitViewerLineToContentWidth(line, contentWidth)}${scrollbar}`;
+  });
+}
+
+export function renderViewerViewportLines(
+  contentLines: readonly string[],
+  visibleStart: number,
+  viewportHeight: number,
+  width: number
+): string[] {
+  const viewportLines = Array.from(
+    { length: viewportHeight },
+    (_unused, index) => contentLines[visibleStart + index] ?? ""
+  );
+
+  return decorateViewerScrollbar(
+    viewportLines,
+    {
+      totalLines: contentLines.length,
+      viewportRows: viewportHeight,
+      scrollOffset: visibleStart,
+    },
+    width
+  );
 }
 
 interface BashExecutionMessage {
   role: "bashExecution";
   command: string;
   output?: string;
-}
-
-function getToolCallName(content: ToolCallContentBlock): string {
-  return content.name ?? content.toolName ?? "unknown";
+  exitCode?: number;
+  cancelled?: boolean;
+  truncated?: boolean;
+  fullOutputPath?: string;
+  excludeFromContext?: boolean;
 }
 
 function isBashExecutionMessage(
@@ -150,20 +254,287 @@ function isBashExecutionMessage(
   );
 }
 
-function matchesPagingAlias(data: string, direction: "up" | "down"): boolean {
-  if (direction === "up") {
-    return matchesKey(data, "pageUp") || matchesKey(data, "ctrl+b");
+function createStoredBashTruncationResult(output: string): TruncationResult {
+  const lines = output ? output.split("\n") : [];
+  const bytes = Buffer.byteLength(output);
+
+  return {
+    content: output,
+    truncated: true,
+    truncatedBy: "bytes",
+    totalLines: lines.length,
+    totalBytes: bytes,
+    outputLines: lines.length,
+    outputBytes: bytes,
+    lastLinePartial: false,
+    firstLineExceedsLimit: false,
+    maxLines: lines.length,
+    maxBytes: bytes,
+  };
+}
+
+export type ScrollInputAction =
+  | "lineUp"
+  | "lineDown"
+  | "pageUp"
+  | "pageDown"
+  | "home"
+  | "end";
+
+export interface ScrollState {
+  scrollOffset: number;
+  autoScroll: boolean;
+}
+
+interface ContentLinesCache {
+  width: number;
+  key: string;
+  lines: string[];
+}
+
+export function getConversationContentCacheKey(
+  record: AgentRecord,
+  activity: AgentActivity | undefined
+): string {
+  if (record.status !== "running" || !activity) {
+    return record.status;
   }
 
-  return matchesKey(data, "pageDown") || matchesKey(data, "ctrl+f");
+  const activeTools = [...activity.activeTools.entries()]
+    .map(([name, value]) => `${name}:${value}`)
+    .join("\u001f");
+  return [record.status, activeTools, activity.responseText].join("\u001e");
+}
+
+export function getScrollInputAction(
+  data: string
+): ScrollInputAction | undefined {
+  const wheelDirection = getMouseWheelDirection(data);
+
+  if (
+    wheelDirection === "up" ||
+    matchesKey(data, "up") ||
+    matchesKey(data, "k")
+  ) {
+    return "lineUp";
+  }
+
+  if (
+    wheelDirection === "down" ||
+    matchesKey(data, "down") ||
+    matchesKey(data, "j")
+  ) {
+    return "lineDown";
+  }
+
+  if (matchesKey(data, "pageUp") || matchesKey(data, "ctrl+b")) {
+    return "pageUp";
+  }
+
+  if (matchesKey(data, "pageDown") || matchesKey(data, "ctrl+f")) {
+    return "pageDown";
+  }
+
+  if (matchesKey(data, "home")) {
+    return "home";
+  }
+
+  if (matchesKey(data, "end")) {
+    return "end";
+  }
+
+  return undefined;
+}
+
+export function updateScrollState(
+  scrollOffset: number,
+  action: ScrollInputAction,
+  viewportHeight: number,
+  maxScroll: number
+): ScrollState {
+  switch (action) {
+    case "lineUp": {
+      const nextOffset = Math.max(0, scrollOffset - 1);
+      return { scrollOffset: nextOffset, autoScroll: nextOffset >= maxScroll };
+    }
+    case "lineDown": {
+      const nextOffset = Math.min(maxScroll, scrollOffset + 1);
+      return { scrollOffset: nextOffset, autoScroll: nextOffset >= maxScroll };
+    }
+    case "pageUp":
+      return {
+        scrollOffset: Math.max(0, scrollOffset - viewportHeight),
+        autoScroll: false,
+      };
+    case "pageDown": {
+      const nextOffset = Math.min(maxScroll, scrollOffset + viewportHeight);
+      return { scrollOffset: nextOffset, autoScroll: nextOffset >= maxScroll };
+    }
+    case "home":
+      return { scrollOffset: 0, autoScroll: false };
+    case "end":
+      return { scrollOffset: maxScroll, autoScroll: true };
+  }
+}
+
+export function renderConversationContentLines(
+  tui: TUI,
+  session: AgentSession,
+  record: AgentRecord,
+  activity: AgentActivity | undefined,
+  theme: Theme,
+  width: number
+): string[] {
+  if (width <= 0) {
+    return [];
+  }
+
+  const messages = session.messages;
+  const lines: string[] = [];
+
+  if (messages.length === 0) {
+    lines.push(theme.fg("dim", "(waiting for first message...)"));
+    return lines;
+  }
+
+  const markdownTheme = getMarkdownTheme();
+  const components: Component[] = [];
+  const pendingTools = new Map<string, ToolExecutionComponent>();
+
+  for (const msg of messages) {
+    if (isBashExecutionMessage(msg)) {
+      const component = new BashExecutionComponent(
+        msg.command,
+        tui,
+        msg.excludeFromContext
+      );
+      if (msg.output) {
+        component.appendOutput(msg.output);
+      }
+      component.setComplete(
+        msg.exitCode,
+        msg.cancelled ?? false,
+        msg.truncated
+          ? createStoredBashTruncationResult(msg.output ?? "")
+          : undefined,
+        msg.fullOutputPath
+      );
+      components.push(component);
+      continue;
+    }
+
+    if (msg.role === "user") {
+      const text =
+        typeof msg.content === "string"
+          ? msg.content
+          : msg.content
+              .filter((content) => content.type === "text")
+              .map((content) => content.text)
+              .join("\n");
+      if (!text.trim()) {
+        continue;
+      }
+
+      const skillBlock = parseSkillBlock(text);
+      if (skillBlock) {
+        const skillComponent = new SkillInvocationMessageComponent(
+          skillBlock,
+          markdownTheme
+        );
+        skillComponent.setExpanded(false);
+        components.push(skillComponent);
+        if (skillBlock.userMessage) {
+          components.push(
+            new UserMessageComponent(skillBlock.userMessage, markdownTheme)
+          );
+        }
+      } else {
+        components.push(new UserMessageComponent(text, markdownTheme));
+      }
+      continue;
+    }
+
+    if (msg.role === "assistant") {
+      components.push(
+        new AssistantMessageComponent(
+          msg,
+          false,
+          markdownTheme,
+          "thinking hidden"
+        )
+      );
+
+      for (const content of msg.content) {
+        if (content.type !== "toolCall") {
+          continue;
+        }
+
+        const component = new ToolExecutionComponent(
+          content.name,
+          content.id,
+          content.arguments,
+          { showImages: false },
+          undefined,
+          tui,
+          process.cwd()
+        );
+        component.setExpanded(false);
+        components.push(component);
+
+        if (msg.stopReason === "aborted" || msg.stopReason === "error") {
+          component.updateResult({
+            content: [
+              {
+                type: "text",
+                text:
+                  msg.stopReason === "aborted"
+                    ? "Operation aborted"
+                    : (msg.errorMessage ?? "Error"),
+              },
+            ],
+            isError: true,
+          });
+        } else {
+          pendingTools.set(content.id, component);
+        }
+      }
+      continue;
+    }
+
+    if (msg.role === "toolResult") {
+      const component = pendingTools.get(msg.toolCallId);
+      if (component) {
+        component.updateResult(msg);
+        pendingTools.delete(msg.toolCallId);
+      }
+    }
+  }
+
+  for (const component of components) {
+    lines.push(...component.render(width));
+  }
+
+  if (record.status === "running" && activity) {
+    const act = describeActivity(activity.activeTools, activity.responseText);
+    lines.push("");
+    lines.push(
+      truncateToWidth(theme.fg("accent", "▍ ") + theme.fg("dim", act), width)
+    );
+  }
+
+  return lines.map((line) =>
+    truncateToWidth(expandTabsForDisplay(line), width)
+  );
 }
 
 export class ConversationViewer implements Component {
   private scrollOffset = 0;
   private autoScroll = true;
   private unsubscribe: (() => void) | undefined;
+  private contentCache: ContentLinesCache | undefined;
   private lastInnerW = 0;
   private closed = false;
+  private readonly releaseMouseWheelReporting = retainMouseWheelReporting();
   private readonly tui: TUI;
   private readonly session: AgentSession;
   private readonly record: AgentRecord;
@@ -189,6 +560,7 @@ export class ConversationViewer implements Component {
       if (this.closed) {
         return;
       }
+      this.invalidateContentCache();
       this.tui.requestRender();
     });
   }
@@ -196,36 +568,30 @@ export class ConversationViewer implements Component {
   handleInput(data: string): void {
     if (matchesKey(data, "escape") || matchesKey(data, "q")) {
       this.closed = true;
+      this.disposeResources();
       this.done(undefined);
       return;
     }
 
-    const totalLines = this.buildContentLines(this.lastInnerW).length;
+    const action = getScrollInputAction(data);
+    if (!action) {
+      return;
+    }
+
+    const totalLines = this.getContentLines(
+      getViewerScrollbarContentWidth(this.lastInnerW)
+    ).length;
     const viewportHeight = this.viewportHeight();
     const maxScroll = Math.max(0, totalLines - viewportHeight);
 
-    if (matchesKey(data, "up") || matchesKey(data, "k")) {
-      this.scrollOffset = Math.max(0, this.scrollOffset - 1);
-      this.autoScroll = this.scrollOffset >= maxScroll;
-    } else if (matchesKey(data, "down") || matchesKey(data, "j")) {
-      this.scrollOffset = Math.min(maxScroll, this.scrollOffset + 1);
-      this.autoScroll = this.scrollOffset >= maxScroll;
-    } else if (matchesPagingAlias(data, "up")) {
-      this.scrollOffset = Math.max(0, this.scrollOffset - viewportHeight);
-      this.autoScroll = false;
-    } else if (matchesPagingAlias(data, "down")) {
-      this.scrollOffset = Math.min(
-        maxScroll,
-        this.scrollOffset + viewportHeight
-      );
-      this.autoScroll = this.scrollOffset >= maxScroll;
-    } else if (matchesKey(data, "home")) {
-      this.scrollOffset = 0;
-      this.autoScroll = false;
-    } else if (matchesKey(data, "end")) {
-      this.scrollOffset = maxScroll;
-      this.autoScroll = true;
-    }
+    const nextState = updateScrollState(
+      this.scrollOffset,
+      action,
+      viewportHeight,
+      maxScroll
+    );
+    this.scrollOffset = nextState.scrollOffset;
+    this.autoScroll = nextState.autoScroll;
   }
 
   render(width: number): string[] {
@@ -251,7 +617,6 @@ export class ConversationViewer implements Component {
     const hrBot = th.fg("border", `╰${"─".repeat(width - 2)}╯`);
     const hrMid = row(th.fg("dim", "─".repeat(innerW)));
 
-    // Header
     lines.push(hrTop);
     const name = getDisplayName(this.record.type);
     const modeLabel = getPromptModeLabel(this.record.type);
@@ -292,8 +657,8 @@ export class ConversationViewer implements Component {
     );
     lines.push(hrMid);
 
-    // Content area — rebuild every render (live data, no cache needed)
-    const contentLines = this.buildContentLines(innerW);
+    const contentWidth = getViewerScrollbarContentWidth(innerW);
+    const contentLines = this.getContentLines(contentWidth);
     const viewportHeight = this.viewportHeight();
     const maxScroll = Math.max(0, contentLines.length - viewportHeight);
 
@@ -302,16 +667,17 @@ export class ConversationViewer implements Component {
     }
 
     const visibleStart = Math.min(this.scrollOffset, maxScroll);
-    const visible = contentLines.slice(
+    const viewportLines = renderViewerViewportLines(
+      contentLines,
       visibleStart,
-      visibleStart + viewportHeight
+      viewportHeight,
+      innerW
     );
 
-    for (let i = 0; i < viewportHeight; i++) {
-      lines.push(row(visible[i] ?? ""));
+    for (const line of viewportLines) {
+      lines.push(row(line));
     }
 
-    // Footer
     lines.push(hrMid);
     const scrollPct =
       contentLines.length <= viewportHeight
@@ -341,139 +707,49 @@ export class ConversationViewer implements Component {
 
   dispose(): void {
     this.closed = true;
+    this.disposeResources();
+  }
+
+  private disposeResources(): void {
+    this.releaseMouseWheelReporting();
     if (this.unsubscribe) {
       this.unsubscribe();
       this.unsubscribe = undefined;
     }
   }
 
-  // ---- Private ----
-
   private viewportHeight(): number {
     return Math.max(MIN_VIEWPORT, this.tui.terminal.rows - CHROME_LINES);
   }
 
+  private invalidateContentCache(): void {
+    this.contentCache = undefined;
+  }
+
+  private getContentLines(width: number): string[] {
+    const key = getConversationContentCacheKey(this.record, this.activity);
+    if (
+      !this.contentCache ||
+      this.contentCache.width !== width ||
+      this.contentCache.key !== key
+    ) {
+      this.contentCache = {
+        width,
+        key,
+        lines: this.buildContentLines(width),
+      };
+    }
+    return this.contentCache.lines;
+  }
+
   private buildContentLines(width: number): string[] {
-    if (width <= 0) {
-      return [];
-    }
-
-    const th = this.theme;
-    const messages = this.session.messages;
-    const lines: string[] = [];
-
-    if (messages.length === 0) {
-      lines.push(th.fg("dim", "(waiting for first message...)"));
-      return lines;
-    }
-
-    let needsSeparator = false;
-    for (const msg of messages) {
-      if (msg.role === "user") {
-        const text =
-          typeof msg.content === "string"
-            ? msg.content
-            : extractText(msg.content);
-        if (!text.trim()) {
-          continue;
-        }
-        if (needsSeparator) {
-          lines.push(th.fg("dim", "───"));
-        }
-        lines.push(th.fg("accent", "[User]"));
-        for (const line of wrapTextWithAnsi(
-          normalizeDisplayText(text.trim()),
-          width
-        )) {
-          lines.push(line);
-        }
-      } else if (msg.role === "assistant") {
-        const textParts: string[] = [];
-        const toolCalls: string[] = [];
-        for (const c of msg.content) {
-          if (c.type === "text" && c.text) {
-            textParts.push(c.text);
-          } else if (c.type === "toolCall") {
-            toolCalls.push(getToolCallName(c));
-          }
-        }
-        if (needsSeparator) {
-          lines.push(th.fg("dim", "───"));
-        }
-        lines.push(th.bold("[Assistant]"));
-        if (textParts.length > 0) {
-          for (const line of wrapTextWithAnsi(
-            normalizeDisplayText(textParts.join("\n").trim()),
-            width
-          )) {
-            lines.push(line);
-          }
-        }
-        for (const name of toolCalls) {
-          lines.push(
-            truncateToWidth(th.fg("muted", `  [Tool: ${name}]`), width)
-          );
-        }
-      } else if (msg.role === "toolResult") {
-        const text = extractText(msg.content);
-        const truncated =
-          text.length > 500 ? `${text.slice(0, 500)}... (truncated)` : text;
-        if (!truncated.trim()) {
-          continue;
-        }
-        if (needsSeparator) {
-          lines.push(th.fg("dim", "───"));
-        }
-        lines.push(th.fg("dim", "[Result]"));
-        for (const line of wrapTextWithAnsi(
-          normalizeDisplayText(truncated.trim()),
-          width
-        )) {
-          lines.push(th.fg("dim", line));
-        }
-      } else if (isBashExecutionMessage(msg)) {
-        const bash = msg;
-        if (needsSeparator) {
-          lines.push(th.fg("dim", "───"));
-        }
-        lines.push(
-          truncateToWidth(
-            th.fg("muted", `  $ ${normalizeDisplayText(bash.command)}`),
-            width
-          )
-        );
-        if (bash.output?.trim()) {
-          const out =
-            bash.output.length > 500
-              ? `${bash.output.slice(0, 500)}... (truncated)`
-              : bash.output;
-          for (const line of wrapTextWithAnsi(
-            normalizeDisplayText(out.trim()),
-            width
-          )) {
-            lines.push(th.fg("dim", line));
-          }
-        }
-      } else {
-        continue;
-      }
-      needsSeparator = true;
-    }
-
-    // Streaming indicator for running agents
-    if (this.record.status === "running" && this.activity) {
-      const act = describeActivity(
-        this.activity.activeTools,
-        this.activity.responseText
-      );
-      lines.push("");
-      lines.push(
-        truncateToWidth(th.fg("accent", "▍ ") + th.fg("dim", act), width)
-      );
-    }
-
-    return lines.map((line) =>
-      truncateToWidth(expandTabsForDisplay(line), width)
+    return renderConversationContentLines(
+      this.tui,
+      this.session,
+      this.record,
+      this.activity,
+      this.theme,
+      width
     );
   }
 }

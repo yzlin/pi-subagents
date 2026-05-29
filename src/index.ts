@@ -117,6 +117,13 @@ function safeFormatTokens(
 }
 
 const PARENT_BRIDGE_MESSAGE_TYPE = "subagent-parent-bridge";
+const SUBAGENT_MODE_EVENT_NAMES = [
+  "subagents:created",
+  "subagents:started",
+  "subagents:completed",
+  "subagents:failed",
+  "subagents:steered",
+] as const;
 
 function getParentSessionId(
   ctx?: Pick<ExtensionContext, "sessionManager">
@@ -1411,18 +1418,46 @@ Guidelines:
         streamUpdate
       );
 
-      // Wire session creation to register in widget
+      // Wire session creation to register in widget and transcript plumbing.
       const origOnSession = fgCallbacks.onSessionCreated;
       fgCallbacks.onSessionCreated = (session: AgentSession) => {
         origOnSession(session);
-        for (const a of manager.listAgents()) {
-          if (a.session === session) {
-            fgId = a.id;
-            agentActivity.set(a.id, fgState);
-            widget.ensureTimer();
-            break;
-          }
+        const record = manager
+          .listAgents()
+          .find((agent) => agent.session === session);
+        if (!record) {
+          return;
         }
+
+        fgId = record.id;
+        agentActivity.set(record.id, fgState);
+        if (!record.outputFile) {
+          record.toolCallId = toolCallId;
+          record.outputFile = createOutputFilePath(
+            ctx.cwd,
+            record.id,
+            ctx.sessionManager.getSessionId()
+          );
+          writeInitialEntry(
+            record.outputFile,
+            record.id,
+            params.prompt,
+            ctx.cwd
+          );
+        }
+        record.outputCleanup = streamToOutputFile(
+          session,
+          record.outputFile,
+          record.id,
+          ctx.cwd
+        );
+        pi.events.emit("subagents:created", {
+          id: record.id,
+          type: subagentType,
+          description: params.description,
+          isBackground: false,
+        });
+        widget.ensureTimer();
       };
 
       // Animate spinner at ~80ms (smooth rotation through 10 braille frames)
@@ -1775,7 +1810,7 @@ Guidelines:
     return getModelLabelFromConfig(cfg.model);
   }
 
-  async function showAgentsMenu(
+  async function _showAgentsMenu(
     ctx: ExtensionCommandContext,
     selectedMenuItem?: string
   ) {
@@ -1795,6 +1830,11 @@ Guidelines:
       const done = agents.filter(
         (a) => a.status === "completed" || a.status === "steered"
       ).length;
+      options.push({
+        value: "subagent-mode",
+        label: `Subagent Mode (${agents.length})`,
+        description: "Full-screen read-only transcript viewer",
+      });
       options.push({
         value: "running-agents",
         label: `Running agents (${agents.length})`,
@@ -1834,17 +1874,20 @@ Guidelines:
       return;
     }
 
-    if (choice === "running-agents") {
+    if (choice === "subagent-mode") {
+      await showSubagentMode(ctx);
+      await _showAgentsMenu(ctx, choice);
+    } else if (choice === "running-agents") {
       await showRunningAgents(ctx);
-      await showAgentsMenu(ctx, choice);
+      await _showAgentsMenu(ctx, choice);
     } else if (choice === "agent-types") {
       await showAllAgentsList(ctx);
-      await showAgentsMenu(ctx, choice);
+      await _showAgentsMenu(ctx, choice);
     } else if (choice === "create-agent") {
       await showCreateWizard(ctx);
     } else if (choice === "settings") {
       await showSettings(ctx);
-      await showAgentsMenu(ctx, choice);
+      await _showAgentsMenu(ctx, choice);
     }
   }
 
@@ -1913,6 +1956,30 @@ Guidelines:
 
     await showAgentDetail(ctx, agentName);
     await showAllAgentsList(ctx, agentName);
+  }
+
+  async function showSubagentMode(ctx: ExtensionCommandContext) {
+    const { SubagentModeViewer } = await import("./ui/subagent-mode-viewer.js");
+
+    await ctx.ui.custom<undefined>((tui, theme, _keybindings, done) => {
+      return new SubagentModeViewer(
+        tui,
+        () => manager.listAgents(),
+        (agentId) => agentActivity.get(agentId),
+        theme,
+        done,
+        (onUpdate) => {
+          const unsubscribers = SUBAGENT_MODE_EVENT_NAMES.map((eventName) =>
+            pi.events.on(eventName, onUpdate)
+          );
+          return () => {
+            for (const unsubscribe of unsubscribers) {
+              unsubscribe();
+            }
+          };
+        }
+      );
+    });
   }
 
   async function showRunningAgents(
@@ -2463,9 +2530,9 @@ ${systemPrompt}
   }
 
   pi.registerCommand("agents", {
-    description: "Manage agents",
+    description: "View subagents",
     handler: async (_args, ctx) => {
-      await showAgentsMenu(ctx);
+      await showSubagentMode(ctx);
     },
   });
 }

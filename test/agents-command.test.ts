@@ -21,7 +21,7 @@ function createTestComponent(
   done: (value: string | undefined) => void
 ): Promise<TestComponent> {
   return factory(
-    { requestRender: vi.fn(), terminal: { columns: 120 } },
+    { requestRender: vi.fn(), terminal: { columns: 120, rows: 24 } },
     TEST_THEME,
     {},
     done
@@ -93,7 +93,7 @@ async function renderRememberingSelect(
 }
 
 describe("/agents command", () => {
-  it("opens the top-level /agents menu in a modal", async () => {
+  it("opens Subagent Mode in a full-screen read-only viewer", async () => {
     const agentsHandler = getAgentsHandler();
 
     const select = vi.fn(async () => undefined);
@@ -109,8 +109,11 @@ describe("/agents command", () => {
       expect(lines[0]).toContain("╭");
       // biome-ignore lint/style/useAtIndex: test LSP target does not include Array.at.
       expect(lines[lines.length - 1]).toContain("╰");
-      expect(lines.some((line: string) => line.includes("Agents"))).toBe(true);
-      done(undefined);
+      expect(lines.some((line: string) => line.includes("No subagents"))).toBe(
+        true
+      );
+      expect(lines.join("\n")).toContain("q/esc exit");
+      component.handleInput?.("q");
       return resolved;
     });
 
@@ -127,105 +130,30 @@ describe("/agents command", () => {
     expect(select).not.toHaveBeenCalled();
   });
 
-  it("shows Settings in a modal with the settings entries", async () => {
+  it("exits Subagent Mode with escape", async () => {
     const agentsHandler = getAgentsHandler();
 
-    let customCallCount = 0;
-    const select = vi.fn(async () => undefined);
     const custom = vi.fn(async (factory: any) => {
-      customCallCount++;
       let resolved: string | undefined;
       function done(value: string | undefined): void {
         resolved = value;
       }
 
       const component = await createTestComponent(factory, done);
-      const lines = component.render(120);
-
-      if (customCallCount === 1) {
-        done("settings");
-      } else if (customCallCount === 2) {
-        const rendered = lines.join("\n");
-        expect(rendered).toContain("Settings");
-        expect(rendered).toContain("Max concurrency (current: 4)");
-        expect(rendered).toContain("Default max turns (current: unlimited)");
-        expect(rendered).toContain("Grace turns (current: 5)");
-        expect(rendered).toContain("Join mode (current: smart)");
-        expect(rendered).toContain("Enter select");
-        expect(rendered).toContain("Esc cancel");
-        done(undefined);
-      } else {
-        done(undefined);
-      }
-
+      component.handleInput?.("\u001b");
       return resolved;
     });
 
     await agentsHandler([], {
       ui: {
-        select,
+        select: vi.fn(),
         custom,
         notify: vi.fn(),
       },
       modelRegistry: undefined,
     });
 
-    expect(custom).toHaveBeenCalledTimes(3);
-    expect(select).not.toHaveBeenCalled();
-  });
-
-  it("returns to Settings after editing a setting", async () => {
-    const agentsHandler = getAgentsHandler();
-
-    let customCallCount = 0;
-    const select = vi.fn(async () => undefined);
-    const input = vi.fn((title: string) => {
-      if (title === "Max concurrent background agents") {
-        return "6";
-      }
-      return undefined;
-    });
-    const custom = vi.fn(async (factory: any) => {
-      customCallCount++;
-      let resolved: string | undefined;
-      function done(value: string | undefined): void {
-        resolved = value;
-      }
-
-      const component = await createTestComponent(factory, done);
-      const lines = component.render(120);
-      const rendered = lines.join("\n");
-
-      if (customCallCount === 1) {
-        done("settings");
-      } else if (customCallCount === 2) {
-        expect(rendered).toContain("Max concurrency (current: 4)");
-        done("max-concurrency");
-      } else if (customCallCount === 3) {
-        expect(rendered).toContain("Settings");
-        expect(rendered).toContain("Max concurrency (current: 6)");
-        expectSelectedLine(component, "Max concurrency (current: 6)");
-        done(undefined);
-      } else {
-        done(undefined);
-      }
-
-      return resolved;
-    });
-
-    await agentsHandler([], {
-      ui: {
-        select,
-        input,
-        custom,
-        notify: vi.fn(),
-      },
-      modelRegistry: undefined,
-    });
-
-    expect(input).toHaveBeenCalledTimes(1);
-    expect(custom).toHaveBeenCalledTimes(4);
-    expect(select).not.toHaveBeenCalled();
+    expect(custom).toHaveBeenCalledTimes(1);
   });
 
   it("supports j/k and ctrl+f/ctrl+b aliases in the modal", async () => {
@@ -248,62 +176,5 @@ describe("/agents command", () => {
 
     component.handleInput?.("\u0002");
     expectSelectedLine(component, "Item 1");
-  });
-
-  it("restores the last selected agent when backing out of agent detail", async () => {
-    const agentsHandler = getAgentsHandler();
-
-    let customCallCount = 0;
-    const select = vi.fn((title: string) => {
-      if (title === "auditor") {
-        return "Back";
-      }
-      return undefined;
-    });
-
-    const custom = vi.fn(async (factory: any) => {
-      customCallCount++;
-      let resolved: string | undefined;
-      function done(value: string | undefined): void {
-        resolved = value;
-      }
-
-      const component = await createTestComponent(factory, done);
-
-      const lines = component.render(120);
-
-      if (customCallCount === 1) {
-        expect(lines[0]).toContain("╭");
-        expect(lines.some((line: string) => line.includes("Agents"))).toBe(
-          true
-        );
-        done("agent-types");
-      } else if (customCallCount === 2) {
-        done("auditor");
-      } else if (customCallCount === 3) {
-        expect(lines.find((line: string) => line.includes("→ "))).toContain(
-          "auditor"
-        );
-        done(undefined);
-      } else if (customCallCount === 4) {
-        expect(lines.find((line: string) => line.includes("→ "))).toContain(
-          "Agent types"
-        );
-        done(undefined);
-      }
-
-      return resolved;
-    });
-
-    await agentsHandler([], {
-      ui: {
-        select,
-        custom,
-        notify: vi.fn(),
-      },
-      modelRegistry: undefined,
-    });
-
-    expect(custom).toHaveBeenCalledTimes(4);
   });
 });

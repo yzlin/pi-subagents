@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Subagent Mode viewer** — `/agents` now opens a full-screen, read-only subagent transcript viewer with live updates, left/right agent switching, keyboard scrolling, mouse wheel support, and a pieditor-style scrollbar.
+- **Mouse wheel input handling** — conversation and subagent viewers now retain terminal mouse reporting while open and support SGR/X10 wheel events.
+
+### Fixed
+- **Agent viewer scroll lag on long messages** — scroll input no longer rebuilds the full rendered conversation on every wheel/key event; rendered content lines are cached and invalidated when the session, width, or live activity changes.
+
 ## [0.6.0] - 2026-04-13
 > **Heads-up — behavior change:**
 > - `isolation: "worktree"` now fails loud (returns an error) instead of silently falling back to the main tree. Affects users running pi in a non-git directory or a fresh repo with no commits.
