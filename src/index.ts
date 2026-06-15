@@ -227,22 +227,6 @@ function createActivityTracker(maxTurns?: number, onStreamUpdate?: () => void) {
   return { state, callbacks };
 }
 
-/** Human-readable status label for agent completion. */
-function getStatusLabel(status: string, error?: string): string {
-  switch (status) {
-    case "error":
-      return `Error: ${error ?? "unknown"}`;
-    case "aborted":
-      return "Aborted (max turns exceeded)";
-    case "steered":
-      return "Wrapped up (turn limit)";
-    case "stopped":
-      return "Stopped";
-    default:
-      return "Done";
-  }
-}
-
 /** Parenthetical status note for completed agent result text. */
 function getStatusNote(status: string): string {
   switch (status) {
@@ -262,63 +246,6 @@ function formatWarningBlock(warnings?: string[]): string {
     return "";
   }
   return `Warnings:\n${warnings.map((warning) => `- ${warning}`).join("\n")}`;
-}
-
-/** Escape XML special characters to prevent injection in structured notifications. */
-function escapeXml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-/** Format a structured task notification matching Claude Code's <task-notification> XML. */
-function formatTaskNotification(
-  record: AgentRecord,
-  resultMaxLen: number
-): string {
-  const status = getStatusLabel(record.status, record.error);
-  const durationMs = record.completedAt
-    ? record.completedAt - record.startedAt
-    : 0;
-  let totalTokens = 0;
-  try {
-    if (record.session) {
-      const stats = record.session.getSessionStats();
-      totalTokens = stats.tokens?.total ?? 0;
-    }
-  } catch {
-    /* session stats unavailable */
-  }
-
-  let resultPreview = "No output.";
-  if (record.result) {
-    resultPreview =
-      record.result.length > resultMaxLen
-        ? `${record.result.slice(0, resultMaxLen)}\n...(truncated, use get_subagent_result for full output)`
-        : record.result;
-  }
-
-  return [
-    "<task-notification>",
-    `<task-id>${record.id}</task-id>`,
-    record.toolCallId
-      ? `<tool-use-id>${escapeXml(record.toolCallId)}</tool-use-id>`
-      : null,
-    record.outputFile
-      ? `<output-file>${escapeXml(record.outputFile)}</output-file>`
-      : null,
-    `<status>${escapeXml(status)}</status>`,
-    record.tags?.length
-      ? `<tags>${record.tags.map(escapeXml).join(",")}</tags>`
-      : null,
-    record.warnings?.length
-      ? `<warnings>${record.warnings.map(escapeXml).join("\n")}</warnings>`
-      : null,
-    `<summary>Agent "${escapeXml(record.description)}" ${record.status}</summary>`,
-    `<result>${escapeXml(resultPreview)}</result>`,
-    `<usage><total_tokens>${totalTokens}</total_tokens><tool_uses>${record.toolUses}</tool_uses><duration_ms>${durationMs}</duration_ms></usage>`,
-    "</task-notification>",
-  ]
-    .filter(Boolean)
-    .join("\n");
 }
 
 /** Build AgentDetails from a base + record-specific fields. */
@@ -363,48 +290,8 @@ function buildDetails(
   };
 }
 
-/** Build notification details for the custom message renderer. */
-function buildNotificationDetails(
-  record: AgentRecord,
-  resultMaxLen: number,
-  activity?: AgentActivity
-): NotificationDetails {
-  let totalTokens = 0;
-  try {
-    if (record.session) {
-      totalTokens = record.session.getSessionStats().tokens?.total ?? 0;
-    }
-  } catch {
-    /* session stats unavailable */
-  }
-
-  let resultPreview = "No output.";
-  if (record.result) {
-    resultPreview =
-      record.result.length > resultMaxLen
-        ? `${record.result.slice(0, resultMaxLen)}…`
-        : record.result;
-  }
-
-  return {
-    id: record.id,
-    description: record.description,
-    status: record.status,
-    toolUses: record.toolUses,
-    turnCount: activity?.turnCount ?? 0,
-    maxTurns: activity?.maxTurns,
-    totalTokens,
-    durationMs: record.completedAt ? record.completedAt - record.startedAt : 0,
-    outputFile: record.outputFile,
-    error: record.error,
-    resultPreview,
-    tags: record.tags,
-    warnings: record.warnings,
-  };
-}
-
 export default function (pi: ExtensionAPI) {
-  // ---- Register custom notification renderer ----
+  // ---- Register legacy custom notification renderer ----
   pi.registerMessageRenderer<NotificationDetails>(
     "subagent-notification",
     (message, { expanded }, theme) => {
@@ -495,65 +382,10 @@ export default function (pi: ExtensionAPI) {
   // ---- Agent activity tracking + widget ----
   const agentActivity = new Map<string, AgentActivity>();
 
-  // ---- Cancellable pending notifications ----
-  // Holds notifications briefly so get_subagent_result can cancel them
-  // before they reach pi.sendMessage (fire-and-forget).
-  const pendingNudges = new Map<string, ReturnType<typeof setTimeout>>();
-  const NUDGE_HOLD_MS = 200;
-
-  function scheduleNudge(key: string, send: () => void, delay = NUDGE_HOLD_MS) {
-    cancelNudge(key);
-    pendingNudges.set(
-      key,
-      setTimeout(() => {
-        pendingNudges.delete(key);
-        try {
-          send();
-        } catch {
-          /* ignore stale completion side-effect errors */
-        }
-      }, delay)
-    );
-  }
-
-  function cancelNudge(key: string) {
-    const timer = pendingNudges.get(key);
-    if (timer != null) {
-      clearTimeout(timer);
-      pendingNudges.delete(key);
-    }
-  }
-
-  // ---- Individual nudge helper (async join mode) ----
-  function emitIndividualNudge(record: AgentRecord) {
-    if (record.resultConsumed) {
-      return; // re-check at send time
-    }
-
-    const notification = formatTaskNotification(record, 500);
-    const footer = record.outputFile
-      ? `\nFull transcript available at: ${record.outputFile}`
-      : "";
-
-    pi.sendMessage<NotificationDetails>(
-      {
-        customType: "subagent-notification",
-        content: notification + footer,
-        display: true,
-        details: buildNotificationDetails(
-          record,
-          500,
-          agentActivity.get(record.id)
-        ),
-      },
-      { deliverAs: "followUp", triggerTurn: true }
-    );
-  }
-
-  function sendIndividualNudge(record: AgentRecord) {
+  // ---- Individual terminal-state helper (async join mode) ----
+  function updateIndividualTerminalState(record: AgentRecord) {
     agentActivity.delete(record.id);
     widget.markFinished(record.id);
-    scheduleNudge(record.id, () => emitIndividualNudge(record));
     widget.update();
   }
 
@@ -608,50 +440,11 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ---- Group join manager ----
-  const groupJoin = new GroupJoinManager((records, partial) => {
+  const groupJoin = new GroupJoinManager((records) => {
     for (const r of records) {
       agentActivity.delete(r.id);
       widget.markFinished(r.id);
     }
-
-    const groupKey = `group:${records.map((r) => r.id).join(",")}`;
-    scheduleNudge(groupKey, () => {
-      // Re-check at send time
-      const unconsumed = records.filter((r) => !r.resultConsumed);
-      if (unconsumed.length === 0) {
-        widget.update();
-        return;
-      }
-
-      const notifications = unconsumed
-        .map((r) => formatTaskNotification(r, 300))
-        .join("\n\n");
-      const label = partial
-        ? `${unconsumed.length} agent(s) finished (partial — others still running)`
-        : `${unconsumed.length} agent(s) finished`;
-
-      const [first, ...rest] = unconsumed;
-      const details = buildNotificationDetails(
-        first,
-        300,
-        agentActivity.get(first.id)
-      );
-      if (rest.length > 0) {
-        details.others = rest.map((r) =>
-          buildNotificationDetails(r, 300, agentActivity.get(r.id))
-        );
-      }
-
-      pi.sendMessage<NotificationDetails>(
-        {
-          customType: "subagent-notification",
-          content: `Background agent group completed: ${label}\n\n${notifications}\n\nUse get_subagent_result for full output.`,
-          display: true,
-          details,
-        },
-        { deliverAs: "followUp", triggerTurn: true }
-      );
-    });
     widget.update();
   }, 30_000);
 
@@ -687,7 +480,7 @@ export default function (pi: ExtensionAPI) {
     };
   }
 
-  // Background completion: route through group join or send individual nudge
+  // Background completion: route through group join or update individual terminal state
   const manager = new AgentManager(
     (record) => {
       // Emit lifecycle event based on terminal status
@@ -726,7 +519,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       // If this agent is pending batch finalization (debounce window still open),
-      // don't send an individual nudge — finalizeBatch will pick it up retroactively.
+      // defer terminal state updates so finalizeBatch can group it retroactively.
       if (currentBatchAgents.some((a) => a.id === record.id)) {
         widget.update();
         return;
@@ -734,10 +527,10 @@ export default function (pi: ExtensionAPI) {
 
       const result = groupJoin.onAgentComplete(record);
       if (result === "pass") {
-        sendIndividualNudge(record);
+        updateIndividualTerminalState(record);
       }
-      // 'held' → do nothing, group will fire later
-      // 'delivered' → group callback already fired
+      // 'held' → do nothing, group will update state later
+      // 'delivered' → group callback already updated state
       widget.update();
     },
     undefined,
@@ -833,10 +626,6 @@ export default function (pi: ExtensionAPI) {
       clearTimeout(batchFinalizeTimer);
       batchFinalizeTimer = undefined;
     }
-    for (const timer of pendingNudges.values()) {
-      clearTimeout(timer);
-    }
-    pendingNudges.clear();
     manager.dispose();
     if (ctx) {
       parentBridge.disposeSession(
@@ -896,12 +685,12 @@ export default function (pi: ExtensionAPI) {
         }
       }
     } else {
-      // No group formed — send individual nudges for any agents that completed
-      // during the debounce window and had their notification deferred.
+      // No group formed — update terminal state for any agents that completed
+      // during the debounce window.
       for (const { id } of batchAgents) {
         const record = manager.getRecord(id);
         if (record?.completedAt != null && !record.resultConsumed) {
-          sendIndividualNudge(record);
+          updateIndividualTerminalState(record);
         }
       }
     }
@@ -984,7 +773,7 @@ Guidelines:
 - Use only agent types that are defined in .pi/agents/<name>.md or ~/.pi/agent/agents/<name>.md.
 - Provide clear, detailed prompts so the agent can work autonomously.
 - Agent results are returned as text — summarize them for the user.
-- Use run_in_background for work you don't need immediately. You will be notified when it completes.
+- Use run_in_background for work you don't need immediately. Completion updates widget/state only; call get_subagent_result to retrieve results.
 - Use resume with an agent ID to continue a previous agent's work.
 - Use steer_subagent to send mid-run messages to a running background agent.
 - Use model to specify a different model (as "provider/modelId", or fuzzy e.g. "haiku", "sonnet").
@@ -1024,7 +813,7 @@ Guidelines:
       run_in_background: Type.Optional(
         Type.Boolean({
           description:
-            "Set to true to run in background. Returns agent ID immediately. You will be notified on completion.",
+            "Set to true to run in background. Returns agent ID immediately; call get_subagent_result to retrieve completion results.",
         })
       ),
       resume: Type.Optional(
@@ -1376,7 +1165,7 @@ Guidelines:
             (isQueued
               ? `Position: queued (max ${manager.getMaxConcurrent()} concurrent)\n`
               : "") +
-            "\nYou will be notified when this agent completes.\n" +
+            "\nCompletion updates widget/state only and will not notify chat.\n" +
             "Use get_subagent_result to retrieve full results, or steer_subagent to send it messages.\n" +
             `Do not duplicate this agent's work.`,
           {
@@ -1570,10 +1359,9 @@ Guidelines:
       // Wait for completion if requested.
       // Pre-mark resultConsumed BEFORE awaiting: onComplete fires inside .then()
       // (attached earlier at spawn time) and always runs before this await resumes.
-      // Setting the flag here prevents a redundant follow-up notification.
+      // Setting the flag here keeps completion widget/state-only.
       if (params.wait && record.status === "running" && record.promise) {
         record.resultConsumed = true;
-        cancelNudge(params.agent_id);
         await record.promise;
       }
 
@@ -1602,10 +1390,9 @@ Guidelines:
         output += record.result?.trim() || "No output.";
       }
 
-      // Mark result as consumed — suppresses the completion notification
+      // Mark result as consumed so later completion handling remains widget/state-only.
       if (record.status !== "running" && record.status !== "queued") {
         record.resultConsumed = true;
-        cancelNudge(params.agent_id);
       }
 
       // Verbose: include full conversation
@@ -2514,7 +2301,7 @@ ${systemPrompt}
             "Default join mode for background agents",
             [
               "smart — auto-group 2+ agents in same turn (default)",
-              "async — always notify individually",
+              "async — update each agent individually",
               "group — always group background agents",
             ]
           );

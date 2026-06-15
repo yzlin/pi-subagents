@@ -14,7 +14,7 @@ https://github.com/user-attachments/assets/8685261b-9338-4fea-8dfe-1c590d5df543
 ## Features
 
 - **Claude Code look & feel** — same tool names, calling conventions, and UI patterns (`Agent`, `get_subagent_result`, `steer_subagent`, `reply_to_subagent`) — feels native
-- **Parallel background agents** — spawn multiple agents that run concurrently with automatic queuing (configurable concurrency limit, default 4) and smart group join (consolidated notifications)
+- **Parallel background agents** — spawn multiple agents that run concurrently with automatic queuing (configurable concurrency limit, default 4) and smart group join for widget state
 - **Live widget UI** — persistent above-editor widget with animated spinners, live tool activity, token counts, and colored status icons
 - **Conversation viewer** — select any agent in `/agents` to open a live-scrolling overlay of its full conversation (auto-follows new content, scroll up to pause)
 - **Custom agent types** — define agents in `.pi/agents/<name>.md` with YAML frontmatter: custom system prompts, model selection, thinking levels, tool restrictions
@@ -29,7 +29,7 @@ https://github.com/user-attachments/assets/8685261b-9338-4fea-8dfe-1c590d5df543
 - **Git worktree isolation** — run agents in isolated repo copies; changes auto-committed to branches on completion
 - **Skill preloading** — inject named skill files from `.pi/skills/` into agent system prompts
 - **Tool denylist** — block specific tools via `disallowed_tools` frontmatter
-- **Styled completion notifications** — background agent results render as themed, compact notification boxes (icon, stats, result preview) instead of raw XML. Expandable to show full output. Group completions render each agent individually
+- **Widget-only terminal state** — background agent completion/failure/stopped states update the live widget, lifecycle events, persisted records, and output files without inserting chat messages or waking the model
 - **Event bus** — lifecycle events (`subagents:created`, `started`, `completed`, `failed`, `steered`) emitted via `pi.events`, enabling other extensions to react to sub-agent activity
 - **Cross-extension RPC** — other pi extensions can spawn and stop subagents via the `pi.events` event bus (`subagents:rpc:ping`, `subagents:rpc:spawn`, `subagents:rpc:stop`). Standardized reply envelopes with protocol versioning. Emits `subagents:ready` on load
 
@@ -60,7 +60,7 @@ Agent({
 })
 ```
 
-Foreground agents block until complete and return results inline. Background agents return an ID immediately and notify you on completion.
+Foreground agents block until complete and return results inline. Background agents return an ID immediately; completion/failure/stopped states update the live widget and remain available through `get_subagent_result` without waking the model.
 
 Subagents launched by this extension also get native bridge tools:
 - `message_parent` — queue a one-way update for the parent
@@ -92,18 +92,9 @@ Individual agent results render Claude Code-style in the conversation:
 | **Error** | `✗ ⟳3 · 3 tool uses · 12.4k token` / `⎿ Error: timeout` |
 | **Aborted** | `✗ ⟳55≤50 · 55 tool uses · 102.3k token` / `⎿ Aborted (max turns exceeded)` |
 
-Completed results can be expanded (ctrl+o in pi) to show the full agent output inline.
+Completed foreground results can be expanded (ctrl+o in pi) to show the full agent output inline.
 
-Background agent completion notifications render as styled boxes:
-
-```
-✓ Find auth files completed
-  ⟳3 · 3 tool uses · 12.4k token · 4.1s
-  ⎿  Found 5 files related to authentication...
-  transcript: .pi/output/agent-abc123.jsonl
-```
-
-Group completions render each agent as a separate block. The LLM receives structured `<task-notification>` XML for parsing, while the user sees the themed visual.
+Background terminal states are widget/state only: completed, failed, and stopped agents update the live widget, emit lifecycle events, persist records/output files, and remain available through `get_subagent_result` without inserting a chat message or triggering a model turn.
 
 ## Agent Types
 
@@ -188,7 +179,7 @@ Behavior:
 - `caveman: true` asks the separate caveman extension to append its canonical caveman prompt before the child session starts.
 - `caveman: false` asks caveman to strip inherited caveman prompt text.
 - The caveman extension must expose event-bus RPC v1 (`caveman:rpc:capabilities` and `caveman:rpc:apply`).
-- If RPC is unavailable, times out, or apply fails, the agent still starts with the unmodified prompt and shows a warning when UI notifications are available.
+- If RPC is unavailable, times out, or apply fails, the agent still starts with the unmodified prompt. Foreground runs can show a UI warning; background runs keep warnings in result details.
 - Non-boolean `caveman` values are treated as omitted and warn during agent startup.
 
 Agent runs are tagged for UI/status rendering: `caveman:on`, `caveman:off`, or `caveman:unavailable`.
@@ -317,15 +308,15 @@ Foreground agents bypass the queue — they block the parent anyway.
 
 ## Join Strategies
 
-When background agents complete, they notify the main agent. The **join mode** controls how these notifications are delivered. It applies only to background agents.
+When background agents complete, terminal state is reflected in the live widget and lifecycle events without waking the main agent. The **join mode** controls how completions are batched for widget/state updates. It applies only to background agents.
 
 | Mode | Behavior |
 |------|----------|
-| `smart` (default) | 2+ background agents spawned in the same turn are auto-grouped into a single consolidated notification. Solo agents notify individually. |
-| `async` | Each agent sends its own notification on completion (original behavior). Best when results need incremental processing. |
+| `smart` (default) | 2+ background agents spawned in the same turn are auto-grouped for consolidated widget/state updates. Solo agents update individually. |
+| `async` | Each agent updates widget/state immediately on completion. |
 | `group` | Force grouping even when spawning a single agent. Useful when you know more agents will follow. |
 
-**Timeout behavior:** When agents are grouped, a 30-second timeout starts after the first agent completes. If not all agents finish in time, a partial notification is sent with completed results and remaining agents continue with a shorter 15-second re-batch window for stragglers.
+**Timeout behavior:** When agents are grouped, a 30-second timeout starts after the first agent completes. If not all agents finish in time, completed results update widget/state and remaining agents continue with a shorter 15-second re-batch window for stragglers.
 
 **Configuration:**
 - Configure join mode in `/agents` → Settings → Join mode
@@ -476,9 +467,9 @@ src/
   types.ts            # Type definitions (AgentConfig, AgentRecord, etc.)
   agent-types.ts      # User-defined agent registry, tool factories
   agent-runner.ts     # Session creation, execution, graceful max_turns, steer/resume
-  agent-manager.ts    # Agent lifecycle, concurrency queue, completion notifications
+  agent-manager.ts    # Agent lifecycle, concurrency queue, terminal state updates
   cross-extension-rpc.ts # RPC handlers for cross-extension spawn/ping via pi.events
-  group-join.ts       # Group join manager: batched completion notifications with timeout
+  group-join.ts       # Group join manager: batched terminal state updates with timeout
   parent-bridge.ts    # Native parent↔subagent message queue + ask/reply coordination
   custom-agents.ts    # Load user-defined agents from .pi/agents/*.md
   memory.ts           # Persistent agent memory (resolve, read, build prompt blocks)

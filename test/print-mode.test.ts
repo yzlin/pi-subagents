@@ -70,7 +70,7 @@ function makeHeadlessCtx(cwd = "/tmp") {
   } as any;
 }
 
-describe("print mode background notifications", () => {
+describe("print mode background terminal state", () => {
   const tempDirs: string[] = [];
 
   afterEach(() => {
@@ -81,12 +81,13 @@ describe("print mode background notifications", () => {
     }
   });
 
-  it("ignores stale-context errors from delayed completion nudges", async () => {
+  it("keeps completed background agents out of chat notifications", async () => {
     vi.mocked(runAgent).mockResolvedValue({
       responseText: "done",
       session: { dispose: vi.fn() } as any,
       aborted: false,
       steered: false,
+      warnings: [],
     });
 
     const cwd = mkdtempSync(join(tmpdir(), "pi-subagents-print-"));
@@ -120,9 +121,12 @@ describe("print mode background notifications", () => {
     );
 
     await vi.advanceTimersByTimeAsync(100); // smart-join batch debounce
-    await vi.advanceTimersByTimeAsync(200); // notification hold window
 
-    expect(pi.sendMessage).toHaveBeenCalled();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
+    expect(pi.events.emit).toHaveBeenCalledWith(
+      "subagents:completed",
+      expect.objectContaining({ description: "tiny child", result: "done" })
+    );
 
     await handlers.get("session_shutdown")?.({}, makeHeadlessCtx(cwd));
   });

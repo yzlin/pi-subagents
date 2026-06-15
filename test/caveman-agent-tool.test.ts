@@ -206,6 +206,68 @@ You are Cave Agent.`,
     handlers.get("session_shutdown")?.({}, undefined);
   });
 
+  it("keeps terminal background completion in widget state without sending chat notifications", async () => {
+    vi.useFakeTimers();
+    try {
+      createAgentSession.mockResolvedValue({ session: createSession("DONE") });
+      const { pi, tools, handlers } = createPiWithFakeCavemanHook();
+      registerExtension(pi);
+      const setWidget = vi.fn();
+      const ctx = {
+        cwd: tmpDir,
+        hasUI: true,
+        ui: { notify: vi.fn(), setStatus: vi.fn(), setWidget },
+        model: undefined,
+        modelRegistry: { find: vi.fn(), getAvailable: vi.fn(() => []) },
+        getSystemPrompt: vi.fn(() => "parent prompt"),
+        sessionManager: {
+          getBranch: vi.fn(() => []),
+          getSessionId: vi.fn(() => "parent-session"),
+        },
+      };
+
+      const started = await tools.get("Agent").execute(
+        "tool-call-1",
+        {
+          subagent_type: "cave",
+          prompt: "Do cave task",
+          description: "Cave task",
+          run_in_background: true,
+          join: "none",
+        },
+        undefined,
+        vi.fn(),
+        ctx
+      );
+      const id = started.content[0].text.match(AGENT_ID_REGEX)?.[1];
+      expect(id).toBeDefined();
+
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(pi.sendMessage).not.toHaveBeenCalled();
+      expect(pi.events.emit).toHaveBeenCalledWith(
+        "subagents:completed",
+        expect.objectContaining({
+          id,
+          description: "Cave task",
+          result: "DONE",
+        })
+      );
+      expect(pi.appendEntry).toHaveBeenCalledWith(
+        "subagents:record",
+        expect.objectContaining({
+          id,
+          description: "Cave task",
+          status: "completed",
+        })
+      );
+      expect(setWidget).toHaveBeenCalled();
+      handlers.get("session_shutdown")?.({}, ctx);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps background caveman RPC warnings out of UI notifications and in result details", async () => {
     createAgentSession.mockResolvedValue({ session: createSession("DONE") });
     const { pi, tools, handlers } = createPiWithFakeCavemanHook({

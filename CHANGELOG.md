@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Mouse wheel input handling** — conversation and subagent viewers now retain terminal mouse reporting while open and support SGR/X10 wheel events.
 
 ### Fixed
+- **Widget-only subagent terminal states** — background subagent completion, failure, and stopped states now update the subagent widget and lifecycle records without posting chat notifications.
 - **Agent viewer scroll lag on long messages** — scroll input no longer rebuilds the full rendered conversation on every wheel/key event; rendered content lines are cached and invalidated when the session, width, or live activity changes.
 
 ## [0.6.0] - 2026-04-13
